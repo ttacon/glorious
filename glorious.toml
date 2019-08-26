@@ -1,0 +1,13 @@
+[[unit]]
+name='super-service'
+description="of course it's in go"
+
+[[unit.slot]]
+cmd="go run main.go"
+
+
+[[unit]]
+name='better service'
+
+[[unit.slot]]
+cmd='./yolo'
