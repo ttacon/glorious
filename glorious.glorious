@@ -1,0 +1,17 @@
+unit "super-service" {
+     name = "super-service"
+     description = "of course it's in go"
+
+     slot {
+          cmd = "go run main.go"
+     }
+}
+
+
+unit "better-service" {
+     name = "better service"
+
+     slot {
+          cmd = "./yolo"
+     }
+}
