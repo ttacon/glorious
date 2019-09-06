@@ -332,22 +332,37 @@ func (s *Slot) Start(u *Unit, ctxt *ishell.Context) error {
 		return s.startBashLocal(u, ctxt)
 	case "docker/local":
 		return s.startDockerLocal(u, ctxt)
+	case "docker/remote":
+		return s.startDockerRemote(u, ctxt)
 	default:
 		return errors.New("unknown provider")
 	}
 }
 
 func (s *Slot) startDockerLocal(u *Unit, ctxt *ishell.Context) error {
+	return s.startDockerInternal(u, ctxt, false)
+}
+
+func (s *Slot) startDockerRemote(u *Unit, ctxt *ishell.Context) error {
+	return s.startDockerInternal(u, ctxt, true)
+}
+
+func (s *Slot) startDockerInternal(u *Unit, ctxt *ishell.Context, remote bool) error {
 	image := s.Provider.Image
 	if len(image) == 0 {
 		return errors.New("no image provided")
 	}
 
-	ctx := context.Background()
-	cli, err := client.NewClientWithOpts(
+	options := []client.Opt{
 		client.FromEnv,
 		client.WithAPIVersionNegotiation(),
-	)
+	}
+	if remote {
+		options = append(options, client.WithHost(s.Provider.Remote.Host))
+	}
+
+	ctx := context.Background()
+	cli, err := client.NewClientWithOpts(options...)
 	if err != nil {
 		return err
 	}
@@ -488,31 +503,43 @@ func (u *Unit) Stop(ctxt *ishell.Context) error {
 		u.Status.Cmd.Stdout = nil
 		u.Status.Cmd.Stderr = nil
 	} else if u.Status.CurrentSlot.Provider.Type == "docker/local" {
-		ctx := context.Background()
-		cli, err := client.NewClientWithOpts(
-			client.FromEnv,
-			client.WithAPIVersionNegotiation(),
-		)
-		if err != nil {
-			return err
-		}
-
-		if err := cli.ContainerStop(ctx, u.Name, nil); err != nil {
-			return err
-		}
-
-		if err := cli.ContainerRemove(
-			ctx,
-			u.Name,
-			types.ContainerRemoveOptions{},
-		); err != nil {
-			return err
-		}
-
+		return u.Status.CurrentSlot.stopDocker(u, ctxt, false)
+	} else if u.Status.CurrentSlot.Provider.Type == "docker/remote" {
+		return u.Status.CurrentSlot.stopDocker(u, ctxt, true)
 	} else {
-		errors.New("unknown provider for unit, cannot stop, also probably wasn't started")
+		return errors.New("unknown provider for unit, cannot stop, also probably wasn't started")
 	}
 
+	return nil
+}
+
+func (s *Slot) stopDocker(u *Unit, ctxt *ishell.Context, remote bool) error {
+	options := []client.Opt{
+		client.FromEnv,
+		client.WithAPIVersionNegotiation(),
+	}
+
+	if remote {
+		options = append(options, client.WithHost(s.Provider.Remote.Host))
+	}
+
+	ctx := context.Background()
+	cli, err := client.NewClientWithOpts(options...)
+	if err != nil {
+		return err
+	}
+
+	if err := cli.ContainerStop(ctx, u.Name, nil); err != nil {
+		return err
+	}
+
+	if err := cli.ContainerRemove(
+		ctx,
+		u.Name,
+		types.ContainerRemoveOptions{},
+	); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -542,6 +569,14 @@ type Provider struct {
 
 	Image string   `hcl:"image"`
 	Ports []string `hcl:"ports"`
+
+	Remote RemoteInfo `hcl:"remote"`
+}
+
+type RemoteInfo struct {
+	Host         string `hcl:"host"`
+	User         string `hcl:"user"`
+	IdentityFile string `hcl:"identityFile"`
 }
 
 func (s Slot) IsDefault() bool {
