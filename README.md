@@ -25,3 +25,19 @@ TB filled out
 ### Auto-detecting new versions of code
 TB filled out (new images, code, etc)
 
+
+### Running list of todos
+
+ - [ ] documentation on configuring `dockerd` for remote API access
+ - [ ] `.glorious` file verification checks at boot up
+ - [ ] daemon for process status monitoring (?)
+ - [ ] ability to identify if remote processes and docker containers are
+       still running
+ - [ ] remote command execution (for "bash/remote" mode)
+ - [ ] file watching and remote synchronization
+ - [ ] remote dev mode constraints (initial setup, command hooks - i.e. npm
+       install after `package[-lock].json` changes)
+ - [ ] debug log mode
+ - [ ] support volume mounting and envvar files for "docker/*" modes
+
+
