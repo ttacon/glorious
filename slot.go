@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -32,7 +33,8 @@ type Provider struct {
 	Image string   `hcl:"image"`
 	Ports []string `hcl:"ports"`
 
-	Remote RemoteInfo `hcl:"remote"`
+	Remote   RemoteInfo    `hcl:"remote"`
+	Handlers []HandlerInfo `hcl:"handler"`
 }
 
 type RemoteInfo struct {
@@ -40,6 +42,13 @@ type RemoteInfo struct {
 	User         string `hcl:"user"`
 	IdentityFile string `hcl:"identityFile"`
 	WorkingDir   string `hcl:workingDir`
+}
+
+type HandlerInfo struct {
+	Type    string `hcl:"type"`
+	Match   string `hcl:"match"`
+	Exclude string `hcl:"exclude"`
+	Cmd     string `hcl:"cmd"`
 }
 
 func (s *Slot) Start(u *Unit, ctxt *ishell.Context) error {
@@ -173,6 +182,39 @@ func (s *Slot) startBashLocal(u *Unit, ctxt *ishell.Context) error {
 	return s.startBashInternal(u, ctxt, false)
 }
 
+func (s *Slot) startBashRemote(u *Unit, ctxt *ishell.Context) error {
+	err := s.startBashInternal(u, ctxt, true)
+	if err != nil {
+		return err
+	}
+
+	// Start a buffered channel
+	s.Events = make(chan notify.EventInfo, 1)
+	err = notify.Watch(fmt.Sprintf("%s/...", s.Provider.WorkingDir), s.Events, notify.All)
+	if err != nil {
+		return errors.New("cannot watch files for the provider")
+	}
+	ctxt.Println("started watcher...")
+	go func() {
+		for {
+			select {
+			case e := <-s.Events:
+				err := s.ExecuteHandlers(e, u)
+				if err != nil {
+					ctxt.Println(err)
+				}
+			}
+		}
+	}()
+
+	err = s.RSync(s.Provider.WorkingDir, u)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (s *Slot) startBashInternal(u *Unit, ctxt *ishell.Context, remote bool) error {
 	cmd := s.Provider.Cmd
 	if len(cmd) == 0 {
@@ -225,37 +267,48 @@ func (s *Slot) startBashInternal(u *Unit, ctxt *ishell.Context, remote bool) err
 	return nil
 }
 
-func (s *Slot) startBashRemote(u *Unit, ctxt *ishell.Context) error {
-	err := s.startBashInternal(u, ctxt, true)
-	if err != nil {
-		return err
-	}
-
-	// Start a buffered channel
-	s.Events = make(chan notify.EventInfo, 1)
-	err = notify.Watch(fmt.Sprintf("%s/...", s.Provider.WorkingDir), s.Events, notify.All)
-	if err != nil {
-		return errors.New("cannot watch files for the provider")
-	}
-	ctxt.Println("started watcher...")
-	go func() {
-		for {
-			select {
-			case e := <-s.Events:
-				if strings.Contains(e.Path(), "node_modules") {
-					continue
-				}
-				err := s.RSync(e.Path(), u)
-				if err != nil {
-					ctxt.Println(err)
-				}
-			}
+func (s *Slot) ExecuteHandlers(e notify.EventInfo, u *Unit) error {
+	for _, handler := range s.Provider.Handlers {
+		var match bool
+		var err error
+		if handler.Match != "" {
+			match, err = regexp.MatchString(handler.Match, e.Path())
+		} else if handler.Exclude != "" {
+			match, err = regexp.MatchString(handler.Exclude, e.Path())
+			// Negate the result since we're excluding files matching this pattern
+			match = !match
 		}
-	}()
 
-	err = s.RSync(s.Provider.WorkingDir, u)
-	if err != nil {
-		return err
+		if err != nil {
+			return err
+		}
+		if match == false {
+			continue
+		}
+
+		switch handler.Type {
+		case "rsync/remote":
+			return s.RSync(e.Path(), u)
+		case "execute/remote":
+			c, err := s.BashCmd(handler.Cmd, true)
+			if err != nil {
+				return err
+			}
+
+			outputFile, err := u.OutputFile()
+			if err != nil {
+				return err
+			}
+
+			c.Stdout = outputFile
+			c.Stderr = outputFile
+
+			if err := c.Start(); err != nil {
+				return err
+			}
+		default:
+			return errors.New("unknown handler")
+		}
 	}
 
 	return nil
@@ -276,7 +329,6 @@ func (s *Slot) BashCmd(cmd string, remote bool) (exec.Cmd, error) {
 
 	remoteHost := fmt.Sprintf("%s@%s", s.Provider.Remote.User, s.Provider.Remote.Host)
 	remoteCmd := fmt.Sprintf("cd %s; %s", s.Provider.Remote.WorkingDir, strings.Join(pieces, " "))
-	fmt.Println(pieces)
 	c := exec.Command("ssh", remoteHost, remoteCmd)
 
 	return *c, nil
@@ -339,6 +391,11 @@ func (s *Slot) stopDocker(u *Unit, ctxt *ishell.Context, remote bool) error {
 }
 
 func (s *Slot) stopBash(u *Unit, ctxt *ishell.Context, remote bool) error {
+	// It's possible to be beaten here by the goroutine that is
+	// waiting on the process to exit, so safety belts!
+	if u.Status.Cmd == nil {
+		return nil
+	}
 
 	if err := u.Status.Cmd.Process.Kill(); err != nil {
 		return err

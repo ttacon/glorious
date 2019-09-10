@@ -14,7 +14,12 @@ var (
 func loadInternalStore() map[string]string {
 	data, err := ioutil.ReadFile(internalStoreFileLocation())
 	if err != nil {
+		if os.IsNotExist(err) {
+			// If the file doesn't exist, return an empty map.
+			return make(map[string]string)
+		}
 		panic(err)
+
 	}
 	var m = make(map[string]string)
 	if err := json.Unmarshal(data, &m); err != nil {
