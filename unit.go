@@ -66,17 +66,9 @@ func (u *Unit) Stop(ctxt *ishell.Context) error {
 
 	// TODO(ttacon): move to refactored function
 	if u.Status.CurrentSlot.Provider.Type == "bash/local" {
-
-		if err := u.Status.Cmd.Process.Kill(); err != nil {
-			return err
-		}
-
-		if err := u.Status.OutFile.Close(); err != nil {
-			return err
-		}
-
-		u.Status.Cmd.Stdout = nil
-		u.Status.Cmd.Stderr = nil
+		return u.Status.CurrentSlot.stopBash(u, ctxt, false)
+	} else if u.Status.CurrentSlot.Provider.Type == "bash/remote" {
+		return u.Status.CurrentSlot.stopBash(u, ctxt, true)
 	} else if u.Status.CurrentSlot.Provider.Type == "docker/local" {
 		return u.Status.CurrentSlot.stopDocker(u, ctxt, false)
 	} else if u.Status.CurrentSlot.Provider.Type == "docker/remote" {
