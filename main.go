@@ -73,6 +73,19 @@ func main() {
 	})
 
 	shell.AddCmd(&ishell.Cmd{
+		Name: "reload",
+		Help: "Reload the glorious config",
+		Func: func(c *ishell.Context) {
+			config, err = loadConfig(*configFileLocation)
+			if err != nil {
+				fmt.Println("failed to reload config: ", err)
+				return
+			}
+			c.Printf("Reloaded glorious config from %s\n", *configFileLocation)
+		},
+	})
+
+	shell.AddCmd(&ishell.Cmd{
 		Name: "start",
 		Help: "Start a given unit",
 		Func: func(c *ishell.Context) {
