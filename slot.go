@@ -162,20 +162,18 @@ func (s *Slot) startDockerInternal(u *Unit, ctxt *ishell.Context, remote bool) e
 }
 
 func (s *Slot) startBashLocal(u *Unit, ctxt *ishell.Context) error {
+	return s.startBashInternal(u, ctxt, false)
+}
+
+func (s *Slot) startBashInternal(u *Unit, ctxt *ishell.Context, remote bool) error {
 	cmd := s.Provider.Cmd
 	if len(cmd) == 0 {
 		return errors.New("no `cmd` provided")
 	}
 
-	// we don't care if it's set or not
-	workingDir := s.Provider.WorkingDir
-
-	pieces := strings.Split(cmd, " ")
-	c := exec.Cmd{}
-	c.Dir = workingDir
-	c.Path = pieces[0]
-	if len(pieces) > 1 {
-		c.Args = pieces[1:]
+	c, err := s.BashCmd(cmd, remote)
+	if err != nil {
+		return err
 	}
 
 	outputFile, err := u.OutputFile()
@@ -215,7 +213,7 @@ func (s *Slot) startBashLocal(u *Unit, ctxt *ishell.Context) error {
 }
 
 func (s *Slot) startBashRemote(u *Unit, ctxt *ishell.Context) error {
-	err := s.startBashLocal(u, ctxt)
+	err := s.startBashInternal(u, ctxt, true)
 	if err != nil {
 		return err
 	}
@@ -250,14 +248,35 @@ func (s *Slot) startBashRemote(u *Unit, ctxt *ishell.Context) error {
 	return nil
 }
 
+func (s *Slot) BashCmd(cmd string, remote bool) (exec.Cmd, error) {
+	pieces := strings.Split(cmd, " ")
+	if remote == false {
+		c := exec.Cmd{}
+		c.Dir = s.Provider.WorkingDir
+		c.Path = pieces[0]
+		if len(pieces) > 1 {
+			c.Args = pieces[1:]
+		}
+
+		return c, nil
+	}
+
+	remoteHost := fmt.Sprintf("%s@%s", s.Provider.Remote.User, s.Provider.Remote.Host)
+	remoteCmd := fmt.Sprintf("cd %s; %s", s.Provider.Remote.WorkingDir, strings.Join(pieces, " "))
+	fmt.Println(pieces)
+	c := exec.Command("ssh", remoteHost, remoteCmd)
+
+	return *c, nil
+}
+
 func (s *Slot) RSync(local string, u *Unit) error {
 	remoteInfo := s.Provider.Remote
 	remoteDir := remoteInfo.WorkingDir
 	if local != s.Provider.WorkingDir {
-		remoteDir = strings.Replace(local, s.Provider.WorkingDir, remoteInfo.WorkingDir, 1)
+		remoteDir = strings.Replace(local, s.Provider.WorkingDir, remoteDir, 1)
 	}
 	remote := fmt.Sprintf("%s@%s:%s", remoteInfo.User, remoteInfo.Host, remoteDir)
-	rsync := exec.Command("rsync", "-avuz", "--exclude", "**/node_modules/*", local, remote)
+	rsync := exec.Command("rsync", "-avuzq", "--exclude", "**/node_modules/*", local, remote)
 
 	outputFile, err := u.OutputFile()
 	if err != nil {
@@ -306,21 +325,22 @@ func (s *Slot) stopDocker(u *Unit, ctxt *ishell.Context, remote bool) error {
 	return nil
 }
 
-func (s *Slot) stopBash(u *Unit, ctxt, *ishell.Context, remote bool) error {
+func (s *Slot) stopBash(u *Unit, ctxt *ishell.Context, remote bool) error {
 
-		if err := u.Status.Cmd.Process.Kill(); err != nil {
-			return err
-		}
+	if err := u.Status.Cmd.Process.Kill(); err != nil {
+		return err
+	}
 
-		if err := u.Status.OutFile.Close(); err != nil {
-			return err
-		}
+	if err := u.Status.OutFile.Close(); err != nil {
+		return err
+	}
 
-		u.Status.Cmd.Stdout = nil
-		u.Status.Cmd.Stderr = nil
+	u.Status.Cmd.Stdout = nil
+	u.Status.Cmd.Stderr = nil
 
-		// Kill the remote watcher if this is a remote bash script
-		if remote {
-			notify.Stop(s.Events)
-		}
+	// Kill the remote watcher if this is a remote bash script
+	if remote {
+		notify.Stop(s.Events)
+	}
+	return nil
 }

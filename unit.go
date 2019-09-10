@@ -9,6 +9,10 @@ import (
 	"github.com/hpcloud/tail"
 )
 
+var (
+	NOT_STARTED = "not started"
+)
+
 type Unit struct {
 	Name        string `hcl:"name"`
 	Description string `hcl:"description"`
@@ -52,7 +56,7 @@ func (u *Unit) OutputFile() (*os.File, error) {
 
 func (u *Unit) ProcessStatus() string {
 	if u.Status == nil {
-		return "not started"
+		return NOT_STARTED
 	}
 	return u.Status.String()
 }
@@ -81,6 +85,10 @@ func (u *Unit) Stop(ctxt *ishell.Context) error {
 }
 
 func (u *Unit) Tail(ctxt *ishell.Context) error {
+	if u.ProcessStatus() == NOT_STARTED {
+		return errors.New("cannot tail a stopped process")
+	}
+
 	t, err := tail.TailFile(u.Status.OutFile.Name(), tail.Config{Follow: true})
 	if err != nil {
 		return err

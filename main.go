@@ -88,22 +88,6 @@ func main() {
 	})
 
 	shell.AddCmd(&ishell.Cmd{
-		Name: "watch",
-		Help: "Watch changes to the given unit",
-		Func: func(c *ishell.Context) {
-			unitsToStart, err := config.GetUnits(c.Args)
-			if err != nil {
-				fmt.Println(err)
-				return
-			}
-
-			for _, unit := range unitsToStart {
-				c.Printf("watching %q...\n", unit.Name)
-			}
-		},
-	})
-
-	shell.AddCmd(&ishell.Cmd{
 		Name: "start",
 		Help: "Start a given unit",
 		Func: func(c *ishell.Context) {
@@ -188,7 +172,7 @@ func main() {
 
 	shell.AddCmd(&ishell.Cmd{
 		Name: "tail",
-		Help: "tails a unit",
+		Help: "Tails a unit",
 		Func: func(c *ishell.Context) {
 			// be cheaper if we can
 			unitName := c.Args[0]
@@ -211,8 +195,8 @@ func main() {
 }
 
 const banner = `
-       _            _                 
-  __ _| | ___  _ __(_) ___  _   _ ___ 
+       _            _
+  __ _| | ___  _ __(_) ___  _   _ ___
  / _  | |/ _ \| '__| |/ _ \| | | / __|
 | (_| | | (_) | |  | | (_) | |_| \__ \
  \__, |_|\___/|_|  |_|\___/ \__,_|___/
