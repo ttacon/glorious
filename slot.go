@@ -23,7 +23,7 @@ type Provider struct {
 	Type string `hcl:"type"`
 
 	WorkingDir string `hcl:"workingDir"`
-	Cmd        string `hcl:"dir"`
+	Cmd        string `hcl:"cmd"`
 
 	Image string   `hcl:"image"`
 	Ports []string `hcl:"ports"`
