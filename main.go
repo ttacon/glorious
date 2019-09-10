@@ -6,18 +6,14 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/abiosoft/ishell"
 	"github.com/hashicorp/hcl"
-	"github.com/tevino/abool"
 )
 
 var (
 	configFileLocation = flag.String("config", "glorious.glorious", "config file location")
-
-	internalStore = make(map[string]string)
 )
 
 func main() {
@@ -126,8 +122,8 @@ func main() {
 			}
 
 			for _, key := range c.Args {
-				val, ok := internalStore[key]
-				if !ok {
+				val, err := getInternalStoreVal(key)
+				if err != nil {
 					val = "(not found)"
 				}
 				c.Printf("%q: %q\n", key, val)
@@ -143,7 +139,14 @@ func main() {
 				return
 			}
 
-			internalStore[c.Args[0]] = c.Args[1]
+			if err := putInternalStoreVal(c.Args[0], c.Args[1]); err != nil {
+				c.Println(err)
+				return
+			}
+
+			if err := config.assertKeyChange(c.Args[0], c); err != nil {
+				c.Println(err)
+			}
 		},
 	})
 	shell.AddCmd(storeCmd)
@@ -243,6 +246,22 @@ func (g *GloriousConfig) GetUnits(args []string) ([]*Unit, error) {
 	return unitsToStart, nil
 }
 
+func (g *GloriousConfig) assertKeyChange(key string, ctxt *ishell.Context) error {
+	for _, unit := range g.Units {
+		for _, slot := range unit.Slots {
+			if slot.Resolver["type"] != "keyword/value" {
+				continue
+			} else if slot.Resolver["keyword"] == key {
+				if err := unit.Restart(ctxt); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 type UnitStatus int
 
 const (
@@ -251,27 +270,3 @@ const (
 	Stopped
 	Crashed
 )
-
-type Status struct {
-	CurrentStatus UnitStatus
-	Cmd           *exec.Cmd
-	OutFile       *os.File
-	CurrentSlot   *Slot
-
-	shutdownRequested *abool.AtomicBool
-}
-
-func (s Status) String() string {
-	var status string
-	switch s.CurrentStatus {
-	case NotStarted:
-		status = "not started"
-	case Running:
-		status = "running"
-	case Stopped:
-		status = "stopped"
-	case Crashed:
-		status = "crashed"
-	}
-	return status
-}

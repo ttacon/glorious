@@ -31,6 +31,13 @@ func (u *Unit) Start(ctxt *ishell.Context) error {
 	return slot.Start(u, ctxt)
 }
 
+func (u *Unit) Restart(ctxt *ishell.Context) error {
+	if err := u.Stop(ctxt); err != nil {
+		return err
+	}
+	return u.Start(ctxt)
+}
+
 func (u *Unit) OutputFile() (*os.File, error) {
 	home := os.Getenv("HOME")
 	if len(home) == 0 {
@@ -68,6 +75,8 @@ func (u *Unit) Stop(ctxt *ishell.Context) error {
 
 	u.Status.shutdownRequested.Set()
 
+	u.Status.Lock()
+	defer u.Status.Unlock()
 	// TODO(ttacon): move to refactored function
 	if u.Status.CurrentSlot.Provider.Type == "bash/local" {
 		return u.Status.CurrentSlot.stopBash(u, ctxt, false)

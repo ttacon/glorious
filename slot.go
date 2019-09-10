@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/abiosoft/ishell"
 	"github.com/docker/docker/api/types"
@@ -68,8 +69,15 @@ func (s Slot) IsDefault() bool {
 }
 
 func (s Slot) Resolve(u *Unit) (bool, error) {
+	keyword := s.Resolver["keyword"]
+	triggerValue := s.Resolver["value"]
 
-	return false, nil
+	existingVal, err := getInternalStoreVal(keyword)
+	if err != nil {
+		return false, err
+	}
+
+	return existingVal == triggerValue, nil
 }
 
 func (s *Slot) startDockerLocal(u *Unit, ctxt *ishell.Context) error {
@@ -195,13 +203,18 @@ func (s *Slot) startBashInternal(u *Unit, ctxt *ishell.Context, remote bool) err
 		CurrentSlot:   s,
 
 		shutdownRequested: abool.New(),
+		lock:              new(sync.Mutex),
 	}
 	u.Status.shutdownRequested.UnSet()
+	u.Status.Lock()
+	defer u.Status.Unlock()
 
 	go func(u *Unit) {
 		if err := u.Status.Cmd.Wait(); err != nil {
 			u.Status.CurrentStatus = Crashed
+			u.Status.Lock()
 			u.Status.Cmd = nil
+			u.Status.Unlock()
 		}
 
 		u.Status.shutdownRequested.UnSet()
