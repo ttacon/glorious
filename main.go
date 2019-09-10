@@ -15,6 +15,8 @@ import (
 
 var (
 	configFileLocation = flag.String("config", "glorious.glorious", "config file location")
+
+	internalStore = make(map[string]string)
 )
 
 func main() {
@@ -99,6 +101,45 @@ func main() {
 		},
 	})
 
+	storeCmd := &ishell.Cmd{
+		Name: "store",
+		Help: "Access the glorious store",
+		Func: func(c *ishell.Context) {
+			c.Println(c.Cmd.HelpText())
+		},
+	}
+	storeCmd.AddCmd(&ishell.Cmd{
+		Name: "get",
+		Help: "Return value for given key",
+		Func: func(c *ishell.Context) {
+			if len(c.Args) == 0 {
+				c.Println("must provide key to retrieve value for")
+				return
+			}
+
+			for _, key := range c.Args {
+				val, ok := internalStore[key]
+				if !ok {
+					val = "(not found)"
+				}
+				c.Printf("%q: %q\n", key, val)
+			}
+		},
+	})
+	storeCmd.AddCmd(&ishell.Cmd{
+		Name: "set",
+		Help: "Stores the key/value pair in the internal store",
+		Func: func(c *ishell.Context) {
+			if len(c.Args) != 2 {
+				c.Println("May only provide a single key value pair")
+				return
+			}
+
+			internalStore[c.Args[0]] = c.Args[1]
+		},
+	})
+	shell.AddCmd(storeCmd)
+
 	shell.AddCmd(&ishell.Cmd{
 		Name: "stop",
 		Help: "Stops given units",
@@ -150,8 +191,9 @@ func main() {
 	shell.Run()
 }
 
-const banner = `       _            _
-  __ _| | ___  _ __(_) ___  _   _ ___
+const banner = `
+       _            _                 
+  __ _| | ___  _ __(_) ___  _   _ ___ 
  / _  | |/ _ \| '__| |/ _ \| | | / __|
 | (_| | | (_) | |  | | (_) | |_| \__ \
  \__, |_|\___/|_|  |_|\___/ \__,_|___/
