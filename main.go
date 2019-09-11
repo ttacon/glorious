@@ -22,11 +22,10 @@ func main() {
 	if err != nil {
 		fmt.Println("failed to load config: ", err)
 		os.Exit(1)
-
 	}
 
 	shell := ishell.New()
-	shell.SetHomeHistoryPath(".ishell_history/glorious")
+	shell.SetHomeHistoryPath(".glorious/history")
 
 	// display welcome info.
 	shell.Println(banner)
@@ -225,6 +224,28 @@ func loadConfig(configFileLocation string) (*GloriousConfig, error) {
 	var m GloriousConfig
 	if err := hcl.Unmarshal(data, &m); err != nil {
 		return nil, err
+	}
+
+	// We need to identify if any previous processes are running.
+	//
+	// For now, we'll solely support docker. Next will be PIDfile based
+	// support.
+	for _, unit := range m.Units {
+		slot, err := unit.identifySlot()
+		if err != nil {
+			// TODO(ttacon): wrap this error
+			return nil, err
+		}
+
+		if slot == nil || slot.Provider == nil {
+			return nil, fmt.Errorf("invalid provider for unit %q", unit.Name)
+		}
+
+		if strings.HasPrefix(slot.Provider.Type, "docker") {
+			if err := unit.populateDockerStatus(slot); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	return &m, nil
