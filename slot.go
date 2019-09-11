@@ -31,9 +31,10 @@ type Provider struct {
 	WorkingDir string `hcl:"workingDir"`
 	Cmd        string `hcl:"cmd"`
 
-	Image   string   `hcl:"image"`
-	Ports   []string `hcl:"ports"`
-	Volumes []string `hcl:"volumes"`
+	Image       string   `hcl:"image"`
+	Ports       []string `hcl:"ports"`
+	Volumes     []string `hcl:"volumes"`
+	Environment []string `hcl:"environment"`
 
 	Remote   RemoteInfo    `hcl:"remote"`
 	Handlers []HandlerInfo `hcl:"handler"`
@@ -167,6 +168,7 @@ func (s *Slot) startDockerInternal(u *Unit, ctxt *ishell.Context, remote bool) e
 
 	resp, err := cli.ContainerCreate(ctx, &container.Config{
 		Image: image,
+		Env:   s.Provider.Environment,
 	}, hostConfig, nil, u.Name)
 	if err != nil {
 		return err

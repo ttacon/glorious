@@ -65,10 +65,10 @@ For more details, see Docker's notes here: https://success.docker.com/article/ho
        still running
  - [ ] support PID file based (bash) process state identification
  - [x] remote command execution (for "bash/remote" mode)
- - [ ] file watching and remote synchronization
- - [ ] remote dev mode constraints (initial setup, command hooks - i.e. npm
+ - [x] file watching and remote synchronization
+ - [x] remote dev mode constraints (initial setup, command hooks - i.e. npm
        install after `package[-lock].json` changes)
  - [ ] debug log mode
- - [ ] support volume mounting and envvar files for "docker/*" modes
+ - [x] support volume mounting and envvar files for "docker/*" modes
 
 
