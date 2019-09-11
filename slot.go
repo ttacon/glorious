@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -12,11 +14,13 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
+	"github.com/rjeczalik/notify"
 	"github.com/tevino/abool"
 )
 
 type Slot struct {
-	Provider *Provider         `hcl:"provider"`
+	Provider *Provider `hcl:"provider"`
+	Events   chan notify.EventInfo
 	Resolver map[string]string `hcl:"resolver"`
 }
 
@@ -29,13 +33,22 @@ type Provider struct {
 	Image string   `hcl:"image"`
 	Ports []string `hcl:"ports"`
 
-	Remote RemoteInfo `hcl:"remote"`
+	Remote   RemoteInfo    `hcl:"remote"`
+	Handlers []HandlerInfo `hcl:"handler"`
 }
 
 type RemoteInfo struct {
 	Host         string `hcl:"host"`
 	User         string `hcl:"user"`
 	IdentityFile string `hcl:"identityFile"`
+	WorkingDir   string `hcl:workingDir`
+}
+
+type HandlerInfo struct {
+	Type    string `hcl:"type"`
+	Match   string `hcl:"match"`
+	Exclude string `hcl:"exclude"`
+	Cmd     string `hcl:"cmd"`
 }
 
 func (s *Slot) Start(u *Unit, ctxt *ishell.Context) error {
@@ -47,6 +60,8 @@ func (s *Slot) Start(u *Unit, ctxt *ishell.Context) error {
 	switch providerType {
 	case "bash/local":
 		return s.startBashLocal(u, ctxt)
+	case "bash/remote":
+		return s.startBashRemote(u, ctxt)
 	case "docker/local":
 		return s.startDockerLocal(u, ctxt)
 	case "docker/remote":
@@ -164,20 +179,51 @@ func (s *Slot) startDockerInternal(u *Unit, ctxt *ishell.Context, remote bool) e
 }
 
 func (s *Slot) startBashLocal(u *Unit, ctxt *ishell.Context) error {
+	return s.startBashInternal(u, ctxt, false)
+}
+
+func (s *Slot) startBashRemote(u *Unit, ctxt *ishell.Context) error {
+	err := s.startBashInternal(u, ctxt, true)
+	if err != nil {
+		return err
+	}
+
+	// Start a buffered channel
+	s.Events = make(chan notify.EventInfo, 1)
+	err = notify.Watch(fmt.Sprintf("%s/...", s.Provider.WorkingDir), s.Events, notify.All)
+	if err != nil {
+		return errors.New("cannot watch files for the provider")
+	}
+	ctxt.Println("started watcher...")
+	go func() {
+		for {
+			select {
+			case e := <-s.Events:
+				err := s.ExecuteHandlers(e, u)
+				if err != nil {
+					ctxt.Println(err)
+				}
+			}
+		}
+	}()
+
+	err = s.RSync(s.Provider.WorkingDir, u)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *Slot) startBashInternal(u *Unit, ctxt *ishell.Context, remote bool) error {
 	cmd := s.Provider.Cmd
 	if len(cmd) == 0 {
 		return errors.New("no `cmd` provided")
 	}
 
-	// we don't care if it's set or not
-	workingDir := s.Provider.WorkingDir
-
-	pieces := strings.Split(cmd, " ")
-	c := exec.Cmd{}
-	c.Dir = workingDir
-	c.Path = pieces[0]
-	if len(pieces) > 1 {
-		c.Args = pieces[1:]
+	c, err := s.BashCmd(cmd, remote)
+	if err != nil {
+		return err
 	}
 
 	outputFile, err := u.OutputFile()
@@ -216,7 +262,99 @@ func (s *Slot) startBashLocal(u *Unit, ctxt *ishell.Context) error {
 		u.Status.shutdownRequested.UnSet()
 	}(u)
 
-	ctxt.Printf("begun as pid %d...", c.Process.Pid)
+	ctxt.Printf("begun as pid %d...\n", c.Process.Pid)
+
+	return nil
+}
+
+func (s *Slot) ExecuteHandlers(e notify.EventInfo, u *Unit) error {
+	for _, handler := range s.Provider.Handlers {
+		var match bool
+		var err error
+		if handler.Match != "" {
+			match, err = regexp.MatchString(handler.Match, e.Path())
+		} else if handler.Exclude != "" {
+			match, err = regexp.MatchString(handler.Exclude, e.Path())
+			// Negate the result since we're excluding files matching this pattern
+			match = !match
+		}
+
+		if err != nil {
+			return err
+		}
+		if match == false {
+			continue
+		}
+
+		switch handler.Type {
+		case "rsync/remote":
+			return s.RSync(e.Path(), u)
+		case "execute/remote":
+			c, err := s.BashCmd(handler.Cmd, true)
+			if err != nil {
+				return err
+			}
+
+			outputFile, err := u.OutputFile()
+			if err != nil {
+				return err
+			}
+
+			c.Stdout = outputFile
+			c.Stderr = outputFile
+
+			if err := c.Start(); err != nil {
+				return err
+			}
+		default:
+			return errors.New("unknown handler")
+		}
+	}
+
+	return nil
+}
+
+func (s *Slot) BashCmd(cmd string, remote bool) (exec.Cmd, error) {
+	pieces := strings.Split(cmd, " ")
+	if remote == false {
+		c := exec.Cmd{}
+		c.Dir = s.Provider.WorkingDir
+		c.Path = pieces[0]
+		if len(pieces) > 1 {
+			c.Args = pieces[1:]
+		}
+
+		return c, nil
+	}
+
+	remoteHost := fmt.Sprintf("%s@%s", s.Provider.Remote.User, s.Provider.Remote.Host)
+	remoteCmd := fmt.Sprintf("cd %s; %s", s.Provider.Remote.WorkingDir, strings.Join(pieces, " "))
+	c := exec.Command("ssh", remoteHost, remoteCmd)
+
+	return *c, nil
+}
+
+func (s *Slot) RSync(local string, u *Unit) error {
+	remoteInfo := s.Provider.Remote
+	remoteDir := remoteInfo.WorkingDir
+	if local != s.Provider.WorkingDir {
+		remoteDir = strings.Replace(local, s.Provider.WorkingDir, remoteDir, 1)
+	}
+	remote := fmt.Sprintf("%s@%s:%s", remoteInfo.User, remoteInfo.Host, remoteDir)
+	rsync := exec.Command("rsync", "-avuzq", "--exclude", "**/node_modules/*", local, remote)
+
+	outputFile, err := u.OutputFile()
+	if err != nil {
+		return err
+	}
+
+	rsync.Stdout = outputFile
+	rsync.Stderr = outputFile
+
+	err = rsync.Run()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -248,6 +386,31 @@ func (s *Slot) stopDocker(u *Unit, ctxt *ishell.Context, remote bool) error {
 		types.ContainerRemoveOptions{},
 	); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (s *Slot) stopBash(u *Unit, ctxt *ishell.Context, remote bool) error {
+	// It's possible to be beaten here by the goroutine that is
+	// waiting on the process to exit, so safety belts!
+	if u.Status.Cmd == nil {
+		return nil
+	}
+
+	if err := u.Status.Cmd.Process.Kill(); err != nil {
+		return err
+	}
+
+	if err := u.Status.OutFile.Close(); err != nil {
+		return err
+	}
+
+	u.Status.Cmd.Stdout = nil
+	u.Status.Cmd.Stderr = nil
+
+	// Kill the remote watcher if this is a remote bash script
+	if remote {
+		notify.Stop(s.Events)
 	}
 	return nil
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -22,7 +23,6 @@ func main() {
 	if err != nil {
 		fmt.Println("failed to load config: ", err)
 		os.Exit(1)
-
 	}
 
 	shell := ishell.New()
@@ -87,19 +87,14 @@ func main() {
 		Name: "start",
 		Help: "Start a given unit",
 		Func: func(c *ishell.Context) {
-			var unitsToStart []*Unit
-			for _, unitName := range c.Args {
-				unit, ok := config.GetUnit(unitName)
-				if !ok {
-					c.Printf("unknown unit %q, aborting\n", unitName)
-					return
-				}
-
-				unitsToStart = append(unitsToStart, unit)
+			unitsToStart, err := config.GetUnits(c.Args)
+			if err != nil {
+				fmt.Println(err)
+				return
 			}
 
 			for _, unit := range unitsToStart {
-				c.Printf("starting %q...", unit.Name)
+				c.Printf("starting %q...\n", unit.Name)
 
 				if err := unit.Start(c); err != nil {
 					fmt.Println(err)
@@ -160,15 +155,10 @@ func main() {
 		Name: "stop",
 		Help: "Stops given units",
 		Func: func(c *ishell.Context) {
-			var unitsToStart []*Unit
-			for _, unitName := range c.Args {
-				unit, ok := config.GetUnit(unitName)
-				if !ok {
-					c.Printf("unknown unit %q, aborting\n", unitName)
-					return
-				}
-
-				unitsToStart = append(unitsToStart, unit)
+			unitsToStart, err := config.GetUnits(c.Args)
+			if err != nil {
+				fmt.Println(err)
+				return
 			}
 
 			for _, unit := range unitsToStart {
@@ -185,7 +175,7 @@ func main() {
 
 	shell.AddCmd(&ishell.Cmd{
 		Name: "tail",
-		Help: "tails a unit",
+		Help: "Tails a unit",
 		Func: func(c *ishell.Context) {
 			// be cheaper if we can
 			unitName := c.Args[0]
@@ -208,8 +198,8 @@ func main() {
 }
 
 const banner = `
-       _            _                 
-  __ _| | ___  _ __(_) ___  _   _ ___ 
+       _            _
+  __ _| | ___  _ __(_) ___  _   _ ___
  / _  | |/ _ \| '__| |/ _ \| | | / __|
 | (_| | | (_) | |  | | (_) | |_| \__ \
  \__, |_|\___/|_|  |_|\___/ \__,_|___/
@@ -241,6 +231,19 @@ func (g *GloriousConfig) GetUnit(name string) (*Unit, bool) {
 		}
 	}
 	return nil, false
+}
+
+func (g *GloriousConfig) GetUnits(args []string) ([]*Unit, error) {
+	var unitsToStart []*Unit
+	for _, unitName := range args {
+		unit, ok := g.GetUnit(unitName)
+		if !ok {
+			return nil, errors.New(fmt.Sprintf("unknown unit %q, aborting", unitName))
+		}
+
+		unitsToStart = append(unitsToStart, unit)
+	}
+	return unitsToStart, nil
 }
 
 func (g *GloriousConfig) assertKeyChange(key string, ctxt *ishell.Context) error {

@@ -9,6 +9,10 @@ import (
 	"github.com/hpcloud/tail"
 )
 
+var (
+	NOT_STARTED = "not started"
+)
+
 type Unit struct {
 	Name        string `hcl:"name"`
 	Description string `hcl:"description"`
@@ -59,7 +63,7 @@ func (u *Unit) OutputFile() (*os.File, error) {
 
 func (u *Unit) ProcessStatus() string {
 	if u.Status == nil {
-		return "not started"
+		return NOT_STARTED
 	}
 	return u.Status.String()
 }
@@ -75,22 +79,9 @@ func (u *Unit) Stop(ctxt *ishell.Context) error {
 	defer u.Status.Unlock()
 	// TODO(ttacon): move to refactored function
 	if u.Status.CurrentSlot.Provider.Type == "bash/local" {
-		// It's possible to be beaten here by the goroutine that is
-		// waiting on the process to exit, so safety belts!
-		if u.Status.Cmd == nil {
-			return nil
-		}
-
-		if err := u.Status.Cmd.Process.Kill(); err != nil {
-			return err
-		}
-
-		if err := u.Status.OutFile.Close(); err != nil {
-			return err
-		}
-
-		u.Status.Cmd.Stdout = nil
-		u.Status.Cmd.Stderr = nil
+		return u.Status.CurrentSlot.stopBash(u, ctxt, false)
+	} else if u.Status.CurrentSlot.Provider.Type == "bash/remote" {
+		return u.Status.CurrentSlot.stopBash(u, ctxt, true)
 	} else if u.Status.CurrentSlot.Provider.Type == "docker/local" {
 		return u.Status.CurrentSlot.stopDocker(u, ctxt, false)
 	} else if u.Status.CurrentSlot.Provider.Type == "docker/remote" {
@@ -103,6 +94,10 @@ func (u *Unit) Stop(ctxt *ishell.Context) error {
 }
 
 func (u *Unit) Tail(ctxt *ishell.Context) error {
+	if u.ProcessStatus() == NOT_STARTED {
+		return errors.New("cannot tail a stopped process")
+	}
+
 	t, err := tail.TailFile(u.Status.OutFile.Name(), tail.Config{Follow: true})
 	if err != nil {
 		return err
