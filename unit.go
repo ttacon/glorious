@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/abiosoft/ishell"
+	"github.com/docker/docker/client"
 	"github.com/hpcloud/tail"
+	"github.com/tevino/abool"
 )
 
 var (
@@ -153,4 +157,39 @@ func (u *Unit) identifySlot() (*Slot, error) {
 		return resolvedSlot, nil
 	}
 	return defaultSlot, nil
+}
+
+func (u *Unit) populateDockerStatus(slot *Slot) error {
+	isRemote := slot.Provider.Type == "docker/remote"
+
+	options := []client.Opt{
+		client.FromEnv,
+		client.WithAPIVersionNegotiation(),
+	}
+	if isRemote {
+		options = append(options, client.WithHost(slot.Provider.Remote.Host))
+	}
+	ctx := context.Background()
+	cli, err := client.NewClientWithOpts(options...)
+	if err != nil {
+		return err
+	}
+
+	if _, err = cli.ContainerInspect(ctx, u.Name); err != nil {
+		if client.IsErrNotFound(err) {
+			return nil
+		}
+		return err
+	}
+
+	u.Status = &Status{
+		CurrentStatus: Running,
+		CurrentSlot:   slot,
+
+		shutdownRequested: abool.New(),
+		lock:              new(sync.Mutex),
+	}
+	u.Status.shutdownRequested.UnSet()
+
+	return nil
 }

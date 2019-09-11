@@ -170,6 +170,7 @@ func (s *Slot) startDockerInternal(u *Unit, ctxt *ishell.Context, remote bool) e
 		CurrentSlot:   s,
 
 		shutdownRequested: abool.New(),
+		lock:              new(sync.Mutex),
 	}
 	u.Status.shutdownRequested.UnSet()
 
@@ -387,6 +388,10 @@ func (s *Slot) stopDocker(u *Unit, ctxt *ishell.Context, remote bool) error {
 	); err != nil {
 		return err
 	}
+
+	u.Status.CurrentStatus = Stopped
+	u.Status.shutdownRequested.Set()
+	u.Status.CurrentSlot = nil
 	return nil
 }
 
