@@ -26,14 +26,44 @@ TB filled out
 TB filled out (new images, code, etc)
 
 
+### Misc
+
+#### dockerd remote API setup
+`dockerd` supports exposing the API remotely if the daemon is configured to do
+so. If on a `systemd` based OS, you can do this by updating your
+`/etc/sysconfig/dockerd` file by adding the following flags to the `OPTIONS`
+var:
+
+```sh
+-H=unix://  -H=tcp://0.0.0.0:2376
+```
+
+i.e.
+```sh
+OPTIONS="--default-ulimit nofile=1024:4096  -H=unix://  -H=tcp://0.0.0.0:2376"
+```
+
+To enforce some degree of security, you should enforce firewall rules to only
+allow traffic to port 2376 from your IP address.
+
+Once you have this configured, reload the config file and restart dockerd:
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl restart docker.service
+```
+
+
 ### Running list of todos
 
- - [ ] documentation on configuring `dockerd` for remote API access
+ - [x] documentation on configuring `dockerd` for remote API access
  - [ ] `.glorious` file verification checks at boot up
- - [ ] daemon for process status monitoring (?)
- - [ ] ability to identify if remote processes and docker containers are
+ - [x] ~daemon for process status monitoring (?)~
+   - instead, each provider should be responsible for its own state tracking.
+ - [x] ability to identify if remote processes and docker containers are
        still running
- - [ ] remote command execution (for "bash/remote" mode)
+ - [ ] support PID file based (bash) process state identification
+ - [x] remote command execution (for "bash/remote" mode)
  - [ ] file watching and remote synchronization
  - [ ] remote dev mode constraints (initial setup, command hooks - i.e. npm
        install after `package[-lock].json` changes)
