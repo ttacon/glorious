@@ -53,6 +53,7 @@ sudo systemctl daemon-reload
 sudo systemctl restart docker.service
 ```
 
+For more details, see Docker's notes here: https://success.docker.com/article/how-do-i-enable-the-remote-api-for-dockerd.
 
 ### Running list of todos
 
