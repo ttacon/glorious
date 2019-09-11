@@ -18,6 +18,15 @@ type Status struct {
 	lock              *sync.Mutex
 }
 
+type UnitStatus int
+
+const (
+	NotStarted UnitStatus = iota
+	Running
+	Stopped
+	Crashed
+)
+
 func (s Status) String() string {
 	var status string
 	switch s.CurrentStatus {

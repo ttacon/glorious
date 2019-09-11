@@ -60,10 +60,11 @@ func main() {
 		Name: "status",
 		Help: "Display status information",
 		Func: func(c *ishell.Context) {
-			c.Printf("%-20s| %-9s\n", "Name", "Status")
+			c.Printf("%-20s|%-20s| %-9s\n", "Name", "Groups", "Status")
 			for _, unit := range config.Units {
-				c.Printf("%-20s| %-9s\n",
+				c.Printf("%-20s|%-20s| %-9s\n",
 					unit.Name,
+					strings.Join(unit.Groups, ", "),
 					unit.ProcessStatus(),
 				)
 			}
@@ -221,7 +222,17 @@ func loadConfig(configFileLocation string) (*GloriousConfig, error) {
 	//
 	// For now, we'll solely support docker. Next will be PIDfile based
 	// support.
+	m.Groups = make(map[string][]string)
 	for _, unit := range m.Units {
+		if len(unit.Groups) > 0 {
+			for _, group := range unit.Groups {
+				if m.Groups[group] == nil {
+					m.Groups[group] = make([]string, 0)
+				}
+				m.Groups[group] = append(m.Groups[group], unit.Name)
+			}
+		}
+
 		slot, err := unit.identifySlot()
 		if err != nil {
 			// TODO(ttacon): wrap this error
@@ -243,7 +254,8 @@ func loadConfig(configFileLocation string) (*GloriousConfig, error) {
 }
 
 type GloriousConfig struct {
-	Units []*Unit `hcl:"unit"`
+	Units  []*Unit `hcl:"unit"`
+	Groups map[string][]string
 }
 
 func (g *GloriousConfig) GetUnit(name string) (*Unit, bool) {
@@ -251,20 +263,45 @@ func (g *GloriousConfig) GetUnit(name string) (*Unit, bool) {
 		if unit.Name == name {
 			return unit, true
 		}
+
 	}
 	return nil, false
 }
 
+func (g *GloriousConfig) GetGroup(name string) ([]*Unit, bool) {
+	if g.Groups[name] == nil {
+		return nil, false
+	}
+
+	var units []*Unit
+	for _, name := range g.Groups[name] {
+		unit, ok := g.GetUnit(name)
+		if !ok {
+			return nil, false
+		}
+
+		units = append(units, unit)
+	}
+
+	return units, true
+}
+
 func (g *GloriousConfig) GetUnits(args []string) ([]*Unit, error) {
 	var unitsToStart []*Unit
-	for _, unitName := range args {
-		unit, ok := g.GetUnit(unitName)
+	for _, name := range args {
+		group, ok := g.GetGroup(name)
+		if ok {
+			return group, nil
+		}
+
+		unit, ok := g.GetUnit(name)
 		if !ok {
-			return nil, errors.New(fmt.Sprintf("unknown unit %q, aborting", unitName))
+			return nil, errors.New(fmt.Sprintf("unknown unit %q, aborting", name))
 		}
 
 		unitsToStart = append(unitsToStart, unit)
 	}
+
 	return unitsToStart, nil
 }
 
@@ -283,12 +320,3 @@ func (g *GloriousConfig) assertKeyChange(key string, ctxt *ishell.Context) error
 
 	return nil
 }
-
-type UnitStatus int
-
-const (
-	NotStarted UnitStatus = iota
-	Running
-	Stopped
-	Crashed
-)

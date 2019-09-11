@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -18,9 +19,10 @@ var (
 )
 
 type Unit struct {
-	Name        string `hcl:"name"`
-	Description string `hcl:"description"`
-	Slots       []Slot `hcl:"slot"`
+	Name        string   `hcl:"name"`
+	Description string   `hcl:"description"`
+	Groups      []string `hcl:"groups"`
+	Slots       []Slot   `hcl:"slot"`
 
 	Status *Status
 }
@@ -30,6 +32,10 @@ func (u *Unit) Start(ctxt *ishell.Context) error {
 	slot, err := u.identifySlot()
 	if err != nil {
 		return err
+	}
+
+	if u.HasStatus(Running) && slot == u.Status.CurrentSlot {
+		return errors.New(fmt.Sprintf("%s is already running", u.Name))
 	}
 
 	return slot.Start(u, ctxt)
@@ -72,9 +78,17 @@ func (u *Unit) ProcessStatus() string {
 	return u.Status.String()
 }
 
+func (u *Unit) HasStatus(status UnitStatus) bool {
+	return u.Status != nil && u.Status.CurrentStatus == status
+}
+
 func (u *Unit) Stop(ctxt *ishell.Context) error {
 	if u.Status == nil {
 		return ErrStopStopped
+	}
+
+	if u.HasStatus(Stopped) {
+		return errors.New(fmt.Sprintf("%s is already stopped", u.Name))
 	}
 
 	u.Status.shutdownRequested.Set()
