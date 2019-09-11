@@ -12,6 +12,7 @@ import (
 	"github.com/abiosoft/ishell"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"github.com/rjeczalik/notify"
@@ -30,8 +31,9 @@ type Provider struct {
 	WorkingDir string `hcl:"workingDir"`
 	Cmd        string `hcl:"cmd"`
 
-	Image string   `hcl:"image"`
-	Ports []string `hcl:"ports"`
+	Image   string   `hcl:"image"`
+	Ports   []string `hcl:"ports"`
+	Volumes []string `hcl:"volumes"`
 
 	Remote   RemoteInfo    `hcl:"remote"`
 	Handlers []HandlerInfo `hcl:"handler"`
@@ -148,6 +150,19 @@ func (s *Slot) startDockerInternal(u *Unit, ctxt *ishell.Context, remote bool) e
 			}
 		}
 		hostConfig.PortBindings = bindings
+	}
+
+	if len(s.Provider.Volumes) > 0 {
+		mounts := make([]mount.Mount, len(s.Provider.Volumes))
+		for i, volume := range s.Provider.Volumes {
+			dirs := strings.Split(volume, ":")
+			mounts[i] = mount.Mount{
+				Type:   mount.TypeBind,
+				Source: dirs[0],
+				Target: dirs[1],
+			}
+		}
+		hostConfig.Mounts = mounts
 	}
 
 	resp, err := cli.ContainerCreate(ctx, &container.Config{
