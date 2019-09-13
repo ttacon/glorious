@@ -19,12 +19,117 @@ in. With `glorious` you can have multiple [slots](./notes.md), where `glorious`
 will determine which `slot` to run depending on the provided criteria. This
 leads to less load locally, saving your computer's resources.
 
+#### units
+
+Units are the top level components in `glorious`. A `unit` defines the *what*
+of what we're trying to run (is it a server, redis node, etc). At the top level,
+a `unit` will usually contain a `name`, a `description` and one or more `slot`s.
+
+
+#### slots
+
+Slots are how we run a `unit`. Each slot will have a `provider`, how we'll run
+it, and a `resolver` which defines when we should run it. We'll check this out
+in an example a little bit later.
+
+
 ### Running code remotely
-TB filled out
+With glorious, you can run code remotely via tunneling to a remote server or
+via the dockerd API.
+
+
+### Providers
+
+`glorious` currently supports four provider types (plugins coming!):
+
+ - `bash/local`: For running code locally.
+ - `bash/remote`: For running code remotely.
+ - `docker/local`: For running docker images locally.
+ - `docker/remote`: For running docker code remotely.
 
 ### Auto-detecting new versions of code
 TB filled out (new images, code, etc)
 
+
+### Example config
+
+```hcl
+// Remote app
+unit "remote-app" {
+  name = "remote-app"
+  description = "example remote app"
+  
+  slot "image-slot" {
+    provider {
+      type = "docker/remote"
+      image = "my-docker-hub/example-app:latest"
+      remote {
+        host = "tcp://dev.remote.box:2376"
+      }
+    }
+
+    resolver {
+      type = "keyword/value"
+      keyword = "services/app/remote/dev-mode"
+      value = "true"
+    }
+  }
+  
+  slot "dev-slot" {
+    type = "bash/remote"
+    workingDir = "/home/user/code/app"
+    cmd = "npm run start"
+    remote {
+      workingDir = "/home/user/code/app"
+      host = "dev.remote.box"
+      user = "user"
+      identityFile = "~/.ssh/user-key.pem"
+    }
+
+    handler "rsync" {
+      type = "rsync/remote"
+      exclude = "node_modules"
+    }
+
+    handler "npm-install" {
+      type = "execute/remote"
+      match = ".*package(-lock)?.json$"
+      cmd = "npm install"
+    }
+  }
+}
+
+// Local app
+unit "local-app" {
+  name = "local-app"
+  description = "example local app"
+
+  slot "dev-slot" {
+    provider {
+      type = "bash/local"
+      workingDir = "/home/user/code/app"
+      cmd = "npm run start"
+    }
+
+    resolver {
+      type = "default"
+    }
+  }
+
+  slot "image-slot" {
+    provider {
+      type = "docker/local"
+      image = "my-docker-hub/example-app:latest"
+    }
+
+    resolver {
+      type = "keyword/value"
+      keyword = "services/app/local/dev-mode"
+      value = "false"
+    }
+  }
+}
+```
 
 ### Misc
 
