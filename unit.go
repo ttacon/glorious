@@ -207,3 +207,16 @@ func (u *Unit) populateDockerStatus(slot *Slot) error {
 
 	return nil
 }
+
+func (u *Unit) Validate() []*ErrWithPath {
+	var unitErrs []*ErrWithPath
+	for _, slot := range u.Slots {
+		if errs := slot.Validate(); len(errs) > 0 {
+			for _, err := range errs {
+				err.Path = append([]string{"unit", u.Name}, err.Path...)
+			}
+			unitErrs = append(unitErrs, errs...)
+		}
+	}
+	return unitErrs
+}

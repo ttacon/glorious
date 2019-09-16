@@ -20,31 +20,17 @@ import (
 )
 
 type Slot struct {
+	Name     string    `hcl:"name"`
 	Provider *Provider `hcl:"provider"`
 	Events   chan notify.EventInfo
 	Resolver map[string]string `hcl:"resolver"`
-}
-
-type Provider struct {
-	Type string `hcl:"type"`
-
-	WorkingDir string `hcl:"workingDir"`
-	Cmd        string `hcl:"cmd"`
-
-	Image       string   `hcl:"image"`
-	Ports       []string `hcl:"ports"`
-	Volumes     []string `hcl:"volumes"`
-	Environment []string `hcl:"environment"`
-
-	Remote   RemoteInfo    `hcl:"remote"`
-	Handlers []HandlerInfo `hcl:"handler"`
 }
 
 type RemoteInfo struct {
 	Host         string `hcl:"host"`
 	User         string `hcl:"user"`
 	IdentityFile string `hcl:"identityFile"`
-	WorkingDir   string `hcl:workingDir`
+	WorkingDir   string `hcl:"workingDir"`
 }
 
 type HandlerInfo struct {
@@ -435,4 +421,29 @@ func (s *Slot) stopBash(u *Unit, ctxt *ishell.Context, remote bool) error {
 		notify.Stop(s.Events)
 	}
 	return nil
+}
+
+type ErrWithPath struct {
+	Path []string
+	Err  error
+}
+
+func (s ErrWithPath) Error() string {
+	return fmt.Sprintf("[%s] %s", strings.Join(s.Path, "."), s.Err)
+}
+
+func (s *Slot) Validate() []*ErrWithPath {
+	var rawErrs = s.Provider.Validate()
+	var errs = make([]*ErrWithPath, len(rawErrs))
+	for i, err := range rawErrs {
+		errs[i] = &ErrWithPath{
+			Path: []string{
+				"slot",
+				s.Name,
+				"provider",
+			},
+			Err: err,
+		}
+	}
+	return errs
 }
