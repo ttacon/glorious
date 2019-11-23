@@ -7,11 +7,18 @@ import (
 	"strings"
 
 	"github.com/abiosoft/ishell"
+	"github.com/ttacon/glorious/store"
 )
 
 var (
 	configFileLocation = flag.String("config", "glorious.glorious", "config file location")
+
+	internalStore = store.NewStore()
 )
+
+func init() {
+	internalStore.LoadInternalStore()
+}
 
 func main() {
 	flag.Parse()
@@ -127,7 +134,7 @@ func main() {
 			}
 
 			for _, key := range c.Args {
-				val, err := getInternalStoreVal(key)
+				val, err := internalStore.GetInternalStoreVal(key)
 				if err != nil {
 					val = "(not found)"
 				}
@@ -144,7 +151,10 @@ func main() {
 				return
 			}
 
-			if err := putInternalStoreVal(c.Args[0], c.Args[1]); err != nil {
+			if err := internalStore.PutInternalStoreVal(
+				c.Args[0],
+				c.Args[1],
+			); err != nil {
 				c.Println(err)
 				return
 			}
