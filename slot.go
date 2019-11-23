@@ -242,6 +242,12 @@ func (s *Slot) startBashInternal(u *Unit, ctxt *ishell.Context, remote bool) err
 		return err
 	}
 
+	// Purge the PID file to disk
+	if err := u.SavePIDFile(&c); err != nil {
+		// TODO(ttacon): we'll need to cleanup here
+		return err
+	}
+
 	u.Status = &Status{
 		CurrentStatus: Running,
 		Cmd:           &c,
