@@ -1,7 +1,9 @@
-package main
+package config
 
 import (
 	"testing"
+
+	"github.com/ttacon/glorious/errors"
 )
 
 func TestGloriousConfigValidate(t *testing.T) {
@@ -15,7 +17,7 @@ func TestGloriousConfigValidate(t *testing.T) {
 		},
 		{
 			raw:          remoteBashErrConfig,
-			expectedErrs: []error{ErrBashRemoteMissingRemote},
+			expectedErrs: []error{errors.ErrBashRemoteMissingRemote},
 		},
 	}
 

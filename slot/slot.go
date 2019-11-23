@@ -1,13 +1,13 @@
-package main
+package slot
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
-	"sync"
 
 	"github.com/abiosoft/ishell"
 	"github.com/docker/docker/api/types"
@@ -16,31 +16,31 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"github.com/rjeczalik/notify"
-	"github.com/tevino/abool"
+	gerrors "github.com/ttacon/glorious/errors"
+	"github.com/ttacon/glorious/provider"
+	"github.com/ttacon/glorious/status"
+	"github.com/ttacon/glorious/store"
 )
 
 type Slot struct {
-	Name     string    `hcl:"name"`
-	Provider *Provider `hcl:"provider"`
+	Name     string             `hcl:"name"`
+	Provider *provider.Provider `hcl:"provider"`
 	Events   chan notify.EventInfo
 	Resolver map[string]string `hcl:"resolver"`
 }
 
-type RemoteInfo struct {
-	Host         string `hcl:"host"`
-	User         string `hcl:"user"`
-	IdentityFile string `hcl:"identityFile"`
-	WorkingDir   string `hcl:"workingDir"`
+type UnitInterface interface {
+	GetName() string
+	SetRunningStatus(*status.Status, status.StatusCallback)
+	GetStatus() *status.Status
+	OutputFile() (*os.File, error)
+	UnsetCurrentSlot()
+	SetCurrentSlot(*Slot)
+	SavePIDFile(c *exec.Cmd) error
+	InternalStore() *store.Store
 }
 
-type HandlerInfo struct {
-	Type    string `hcl:"type"`
-	Match   string `hcl:"match"`
-	Exclude string `hcl:"exclude"`
-	Cmd     string `hcl:"cmd"`
-}
-
-func (s *Slot) Start(u *Unit, ctxt *ishell.Context) error {
+func (s *Slot) Start(u UnitInterface, ctxt *ishell.Context) error {
 	providerType := s.Provider.Type
 	if len(providerType) == 0 {
 		return errors.New("no provider given")
@@ -60,17 +60,37 @@ func (s *Slot) Start(u *Unit, ctxt *ishell.Context) error {
 	}
 }
 
+func (s *Slot) Stop(u UnitInterface, ctxt *ishell.Context) error {
+	providerType := s.Provider.Type
+	if len(providerType) == 0 {
+		return errors.New("no provider given")
+	}
+
+	switch providerType {
+	case "bash/local":
+		return s.stopBash(u, ctxt, false)
+	case "bash/remote":
+		return s.stopBash(u, ctxt, true)
+	case "docker/local":
+		return s.stopDocker(u, ctxt, false)
+	case "docker/remote":
+		return s.stopDocker(u, ctxt, true)
+	default:
+		return errors.New("unknown provider for unit, cannot stop, also probably wasn't started")
+	}
+}
+
 func (s Slot) IsDefault() bool {
 	typ, ok := s.Resolver["type"]
 
 	return ok && typ == "default"
 }
 
-func (s Slot) Resolve(u *Unit) (bool, error) {
+func (s Slot) Resolve(u UnitInterface) (bool, error) {
 	keyword := s.Resolver["keyword"]
 	triggerValue := s.Resolver["value"]
 
-	existingVal, err := internalStore.GetInternalStoreVal(keyword)
+	existingVal, err := u.InternalStore().GetInternalStoreVal(keyword)
 	if err != nil {
 		return false, err
 	}
@@ -78,15 +98,15 @@ func (s Slot) Resolve(u *Unit) (bool, error) {
 	return existingVal == triggerValue, nil
 }
 
-func (s *Slot) startDockerLocal(u *Unit, ctxt *ishell.Context) error {
+func (s *Slot) startDockerLocal(u UnitInterface, ctxt *ishell.Context) error {
 	return s.startDockerInternal(u, ctxt, false)
 }
 
-func (s *Slot) startDockerRemote(u *Unit, ctxt *ishell.Context) error {
+func (s *Slot) startDockerRemote(u UnitInterface, ctxt *ishell.Context) error {
 	return s.startDockerInternal(u, ctxt, true)
 }
 
-func (s *Slot) startDockerInternal(u *Unit, ctxt *ishell.Context, remote bool) error {
+func (s *Slot) startDockerInternal(u UnitInterface, ctxt *ishell.Context, remote bool) error {
 	image := s.Provider.Image
 	if len(image) == 0 {
 		return errors.New("no image provided")
@@ -155,7 +175,7 @@ func (s *Slot) startDockerInternal(u *Unit, ctxt *ishell.Context, remote bool) e
 	resp, err := cli.ContainerCreate(ctx, &container.Config{
 		Image: image,
 		Env:   s.Provider.Environment,
-	}, hostConfig, nil, u.Name)
+	}, hostConfig, nil, u.GetName())
 	if err != nil {
 		return err
 	}
@@ -168,25 +188,19 @@ func (s *Slot) startDockerInternal(u *Unit, ctxt *ishell.Context, remote bool) e
 		return err
 	}
 
-	u.Status = &Status{
-		CurrentStatus: Running,
-		CurrentSlot:   s,
-
-		shutdownRequested: abool.New(),
-		lock:              new(sync.Mutex),
-	}
-	u.Status.shutdownRequested.UnSet()
+	u.SetCurrentSlot(s)
+	u.SetRunningStatus(status.NewRunningStatus(nil, nil), nil)
 
 	ctxt.Println("begun as container ", resp.ID)
 
 	return nil
 }
 
-func (s *Slot) startBashLocal(u *Unit, ctxt *ishell.Context) error {
+func (s *Slot) startBashLocal(u UnitInterface, ctxt *ishell.Context) error {
 	return s.startBashInternal(u, ctxt, false)
 }
 
-func (s *Slot) startBashRemote(u *Unit, ctxt *ishell.Context) error {
+func (s *Slot) startBashRemote(u UnitInterface, ctxt *ishell.Context) error {
 	err := s.startBashInternal(u, ctxt, true)
 	if err != nil {
 		return err
@@ -219,7 +233,7 @@ func (s *Slot) startBashRemote(u *Unit, ctxt *ishell.Context) error {
 	return nil
 }
 
-func (s *Slot) startBashInternal(u *Unit, ctxt *ishell.Context, remote bool) error {
+func (s *Slot) startBashInternal(u UnitInterface, ctxt *ishell.Context, remote bool) error {
 	cmd := s.Provider.Cmd
 	if len(cmd) == 0 {
 		return errors.New("no `cmd` provided")
@@ -248,36 +262,22 @@ func (s *Slot) startBashInternal(u *Unit, ctxt *ishell.Context, remote bool) err
 		return err
 	}
 
-	u.Status = &Status{
-		CurrentStatus: Running,
-		Cmd:           &c,
-		OutFile:       outputFile,
-		CurrentSlot:   s,
-
-		shutdownRequested: abool.New(),
-		lock:              new(sync.Mutex),
-	}
-	u.Status.shutdownRequested.UnSet()
-	u.Status.Lock()
-	defer u.Status.Unlock()
-
-	go func(u *Unit) {
-		if err := u.Status.Cmd.Wait(); err != nil {
-			u.Status.CurrentStatus = Crashed
-			u.Status.Lock()
-			u.Status.Cmd = nil
-			u.Status.Unlock()
-		}
-
-		u.Status.shutdownRequested.UnSet()
-	}(u)
+	u.SetCurrentSlot(s)
+	u.SetRunningStatus(status.NewRunningStatus(
+		&c,
+		outputFile,
+	), func(stat *status.Status) {
+		go func(stat *status.Status) {
+			stat.WaitForCommandEnd()
+		}(stat)
+	})
 
 	ctxt.Printf("begun as pid %d...\n", c.Process.Pid)
 
 	return nil
 }
 
-func (s *Slot) ExecuteHandlers(e notify.EventInfo, u *Unit) error {
+func (s *Slot) ExecuteHandlers(e notify.EventInfo, u UnitInterface) error {
 	for _, handler := range s.Provider.Handlers {
 		var match bool
 		var err error
@@ -344,7 +344,7 @@ func (s *Slot) BashCmd(cmd string, remote bool) (exec.Cmd, error) {
 	return *c, nil
 }
 
-func (s *Slot) RSync(local string, u *Unit) error {
+func (s *Slot) RSync(local string, u UnitInterface) error {
 	remoteInfo := s.Provider.Remote
 	remoteDir := remoteInfo.WorkingDir
 	if local != s.Provider.WorkingDir {
@@ -368,9 +368,7 @@ func (s *Slot) RSync(local string, u *Unit) error {
 	return nil
 }
 
-var ErrStopStopped = errors.New("cannot stop stopped unit")
-
-func (s *Slot) stopDocker(u *Unit, ctxt *ishell.Context, remote bool) error {
+func (s *Slot) stopDocker(u UnitInterface, ctxt *ishell.Context, remote bool) error {
 	options := []client.Opt{
 		client.FromEnv,
 		client.WithAPIVersionNegotiation(),
@@ -386,41 +384,45 @@ func (s *Slot) stopDocker(u *Unit, ctxt *ishell.Context, remote bool) error {
 		return err
 	}
 
-	if err := cli.ContainerStop(ctx, u.Name, nil); err != nil {
+	if err := cli.ContainerStop(ctx, u.GetName(), nil); err != nil {
 		return err
 	}
 
 	if err := cli.ContainerRemove(
 		ctx,
-		u.Name,
+		u.GetName(),
 		types.ContainerRemoveOptions{},
 	); err != nil {
 		return err
 	}
 
-	u.Status.CurrentStatus = Stopped
-	u.Status.shutdownRequested.Set()
-	u.Status.CurrentSlot = nil
+	stat := u.GetStatus()
+
+	stat.Stop()
+	u.UnsetCurrentSlot()
+
 	return nil
 }
 
-func (s *Slot) stopBash(u *Unit, ctxt *ishell.Context, remote bool) error {
+func (s *Slot) stopBash(u UnitInterface, ctxt *ishell.Context, remote bool) error {
+	stat := u.GetStatus()
+
 	// It's possible to be beaten here by the goroutine that is
 	// waiting on the process to exit, so safety belts!
-	if u.Status.Cmd == nil {
+	if stat.Cmd == nil {
 		return nil
 	}
 
-	if err := u.Status.Cmd.Process.Kill(); err != nil {
+	if err := stat.Cmd.Process.Kill(); err != nil {
 		return err
 	}
 
-	if err := u.Status.OutFile.Close(); err != nil {
+	if err := stat.OutFile.Close(); err != nil {
 		return err
 	}
 
-	u.Status.Cmd.Stdout = nil
-	u.Status.Cmd.Stderr = nil
+	stat.Cmd.Stdout = nil
+	stat.Cmd.Stderr = nil
 
 	// Kill the remote watcher if this is a remote bash script
 	if remote {
@@ -429,20 +431,11 @@ func (s *Slot) stopBash(u *Unit, ctxt *ishell.Context, remote bool) error {
 	return nil
 }
 
-type ErrWithPath struct {
-	Path []string
-	Err  error
-}
-
-func (s ErrWithPath) Error() string {
-	return fmt.Sprintf("[%s] %s", strings.Join(s.Path, "."), s.Err)
-}
-
-func (s *Slot) Validate() []*ErrWithPath {
+func (s *Slot) Validate() []*gerrors.ErrWithPath {
 	var rawErrs = s.Provider.Validate()
-	var errs = make([]*ErrWithPath, len(rawErrs))
+	var errs = make([]*gerrors.ErrWithPath, len(rawErrs))
 	for i, err := range rawErrs {
-		errs[i] = &ErrWithPath{
+		errs[i] = &gerrors.ErrWithPath{
 			Path: []string{
 				"slot",
 				s.Name,
