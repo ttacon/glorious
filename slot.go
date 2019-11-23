@@ -70,7 +70,7 @@ func (s Slot) Resolve(u *Unit) (bool, error) {
 	keyword := s.Resolver["keyword"]
 	triggerValue := s.Resolver["value"]
 
-	existingVal, err := getInternalStoreVal(keyword)
+	existingVal, err := internalStore.GetInternalStoreVal(keyword)
 	if err != nil {
 		return false, err
 	}
