@@ -7,32 +7,39 @@ import (
 	"strings"
 
 	"github.com/abiosoft/ishell"
-	"github.com/ttacon/glorious/store"
+	"github.com/ttacon/glorious/config"
+	"github.com/ttacon/glorious/context"
 )
 
 var (
 	configFileLocation = flag.String("config", "glorious.glorious", "config file location")
 
-	internalStore = store.NewStore()
+	contex context.Context
 )
 
 func init() {
-	internalStore.LoadInternalStore()
+	contex = context.NewContext()
 }
 
 func main() {
 	flag.Parse()
 
-	config, err := loadConfig(*configFileLocation)
+	conf, err := config.LoadConfig(*configFileLocation)
 	if err != nil {
 		fmt.Println("failed to load config: ", err)
 		os.Exit(1)
 	}
-	if errs := config.Validate(); len(errs) > 0 {
+	if errs := conf.Validate(); len(errs) > 0 {
 		fmt.Println("validation errors detected:")
 		for i, err := range errs {
 			fmt.Printf("[err %d] %s\n", i, err)
 		}
+		os.Exit(1)
+	}
+
+	conf.SetContext(contex)
+	if err := conf.Init(); err != nil {
+		fmt.Println("failed to initialize config, err: ", err)
 		os.Exit(1)
 	}
 
@@ -56,7 +63,7 @@ func main() {
 		Help: "Display config information",
 		Func: func(c *ishell.Context) {
 			c.Printf("%-20s| %-9s| Description\n", "Name", "# units")
-			for _, unit := range config.Units {
+			for _, unit := range conf.Units {
 				c.Printf("%-20s| %-9s| %s\n",
 					unit.Name,
 					fmt.Sprintf("%d units", len(unit.Slots)),
@@ -72,7 +79,7 @@ func main() {
 		Help: "Display status information",
 		Func: func(c *ishell.Context) {
 			c.Printf("%-20s|%-20s| %-9s\n", "Name", "Groups", "Status")
-			for _, unit := range config.Units {
+			for _, unit := range conf.Units {
 				c.Printf("%-20s|%-20s| %-9s\n",
 					unit.Name,
 					strings.Join(unit.Groups, ", "),
@@ -86,7 +93,7 @@ func main() {
 		Name: "reload",
 		Help: "Reload the glorious config",
 		Func: func(c *ishell.Context) {
-			config, err = loadConfig(*configFileLocation)
+			conf, err = config.LoadConfig(*configFileLocation)
 			if err != nil {
 				fmt.Println("failed to reload config: ", err)
 				return
@@ -99,7 +106,7 @@ func main() {
 		Name: "start",
 		Help: "Start a given unit",
 		Func: func(c *ishell.Context) {
-			unitsToStart, err := config.GetUnits(c.Args)
+			unitsToStart, err := conf.GetUnits(c.Args)
 			if err != nil {
 				fmt.Println(err)
 				return
@@ -134,7 +141,7 @@ func main() {
 			}
 
 			for _, key := range c.Args {
-				val, err := internalStore.GetInternalStoreVal(key)
+				val, err := contex.InternalStore().GetInternalStoreVal(key)
 				if err != nil {
 					val = "(not found)"
 				}
@@ -151,7 +158,7 @@ func main() {
 				return
 			}
 
-			if err := internalStore.PutInternalStoreVal(
+			if err := contex.InternalStore().PutInternalStoreVal(
 				c.Args[0],
 				c.Args[1],
 			); err != nil {
@@ -159,7 +166,7 @@ func main() {
 				return
 			}
 
-			if err := config.assertKeyChange(c.Args[0], c); err != nil {
+			if err := conf.AssertKeyChange(c.Args[0], c); err != nil {
 				c.Println(err)
 			}
 		},
@@ -170,7 +177,7 @@ func main() {
 		Name: "stop",
 		Help: "Stops given units",
 		Func: func(c *ishell.Context) {
-			unitsToStart, err := config.GetUnits(c.Args)
+			unitsToStart, err := conf.GetUnits(c.Args)
 			if err != nil {
 				fmt.Println(err)
 				return
@@ -194,7 +201,7 @@ func main() {
 		Func: func(c *ishell.Context) {
 			// be cheaper if we can
 			unitName := c.Args[0]
-			unit, ok := config.GetUnit(unitName)
+			unit, ok := conf.GetUnit(unitName)
 			if !ok {
 				c.Printf("unknown unit %q, aborting\n", unitName)
 				return

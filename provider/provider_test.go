@@ -1,6 +1,10 @@
-package main
+package provider
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/ttacon/glorious/errors"
+)
 
 func TestProviderValidate(t *testing.T) {
 
@@ -13,7 +17,7 @@ func TestProviderValidate(t *testing.T) {
 				Type: "foo",
 			},
 			expectedErrs: []error{
-				ErrUnknownProvider,
+				errors.ErrUnknownProvider,
 			},
 		},
 		// Bash specific
@@ -39,7 +43,7 @@ func TestProviderValidate(t *testing.T) {
 				WorkingDir: "/home/yolo",
 				Image:      "super/app",
 			},
-			expectedErrs: []error{ErrBashExtraneousFields},
+			expectedErrs: []error{errors.ErrBashExtraneousFields},
 		},
 		{
 			Provider: Provider{
@@ -47,7 +51,7 @@ func TestProviderValidate(t *testing.T) {
 				Cmd:        "npm run start",
 				WorkingDir: "/home/yolo",
 			},
-			expectedErrs: []error{ErrBashRemoteMissingRemote},
+			expectedErrs: []error{errors.ErrBashRemoteMissingRemote},
 		},
 		// Docker specific
 		{
@@ -63,7 +67,7 @@ func TestProviderValidate(t *testing.T) {
 				Cmd:   "npm run start",
 				Image: "super/app",
 			},
-			expectedErrs: []error{ErrDockerExtraneousFields},
+			expectedErrs: []error{errors.ErrDockerExtraneousFields},
 		},
 		{
 			Provider: Provider{
@@ -71,7 +75,7 @@ func TestProviderValidate(t *testing.T) {
 				Image: "super/app",
 				Ports: []string{"0.0.0.0:80:80"},
 			},
-			expectedErrs: []error{ErrDockerRemoteMissingRemote},
+			expectedErrs: []error{errors.ErrDockerRemoteMissingRemote},
 		},
 	}
 

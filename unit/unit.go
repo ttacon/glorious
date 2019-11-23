@@ -1,4 +1,4 @@
-package main
+package unit
 
 import (
 	"context"
@@ -9,12 +9,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
-	"sync"
+	"strings"
 
 	"github.com/abiosoft/ishell"
 	"github.com/docker/docker/client"
 	"github.com/hpcloud/tail"
-	"github.com/tevino/abool"
+	gcontext "github.com/ttacon/glorious/context"
+	gerrors "github.com/ttacon/glorious/errors"
+	"github.com/ttacon/glorious/slot"
+	"github.com/ttacon/glorious/status"
+	"github.com/ttacon/glorious/store"
 )
 
 var (
@@ -22,23 +26,29 @@ var (
 )
 
 type Unit struct {
-	Name        string   `hcl:"name"`
-	Description string   `hcl:"description"`
-	Groups      []string `hcl:"groups"`
-	Slots       []Slot   `hcl:"slot"`
+	Name        string      `hcl:"name"`
+	Description string      `hcl:"description"`
+	Groups      []string    `hcl:"groups"`
+	Slots       []slot.Slot `hcl:"slot"`
 
-	Status *Status
+	Status      *status.Status
+	CurrentSlot *slot.Slot
+	Context     gcontext.Context
+}
+
+func (u *Unit) SetContext(c gcontext.Context) {
+	u.Context = c
 }
 
 func (u *Unit) Start(ctxt *ishell.Context) error {
 	// now for some tomfoolery
-	slot, err := u.identifySlot()
+	slot, err := u.IdentifySlot()
 	if err != nil {
 		return err
 	}
 
-	if u.HasStatus(Running) && slot == u.Status.CurrentSlot {
-		return errors.New(fmt.Sprintf("%s is already running", u.Name))
+	if u.HasStatus(status.Running) && slot == u.CurrentSlot {
+		return fmt.Errorf("%s is already running", u.Name)
 	}
 
 	return slot.Start(u, ctxt)
@@ -105,37 +115,25 @@ func (u *Unit) ProcessStatus() string {
 	return u.Status.String()
 }
 
-func (u *Unit) HasStatus(status UnitStatus) bool {
+func (u *Unit) HasStatus(status status.UnitStatus) bool {
 	return u.Status != nil && u.Status.CurrentStatus == status
 }
 
 func (u *Unit) Stop(ctxt *ishell.Context) error {
 	if u.Status == nil {
-		return ErrStopStopped
+		return gerrors.ErrStopStopped
 	}
 
-	if u.HasStatus(Stopped) {
-		return errors.New(fmt.Sprintf("%s is already stopped", u.Name))
+	if u.HasStatus(status.Stopped) {
+		return fmt.Errorf("%s is already stopped", u.Name)
 	}
 
-	u.Status.shutdownRequested.Set()
+	u.Status.MarkShutdownRequested()
 
 	u.Status.Lock()
 	defer u.Status.Unlock()
-	// TODO(ttacon): move to refactored function
-	if u.Status.CurrentSlot.Provider.Type == "bash/local" {
-		return u.Status.CurrentSlot.stopBash(u, ctxt, false)
-	} else if u.Status.CurrentSlot.Provider.Type == "bash/remote" {
-		return u.Status.CurrentSlot.stopBash(u, ctxt, true)
-	} else if u.Status.CurrentSlot.Provider.Type == "docker/local" {
-		return u.Status.CurrentSlot.stopDocker(u, ctxt, false)
-	} else if u.Status.CurrentSlot.Provider.Type == "docker/remote" {
-		return u.Status.CurrentSlot.stopDocker(u, ctxt, true)
-	} else {
-		return errors.New("unknown provider for unit, cannot stop, also probably wasn't started")
-	}
 
-	return nil
+	return u.CurrentSlot.Stop(u, ctxt)
 }
 
 func (u *Unit) Tail(ctxt *ishell.Context) error {
@@ -154,7 +152,26 @@ func (u *Unit) Tail(ctxt *ishell.Context) error {
 	return nil
 }
 
-func (u *Unit) identifySlot() (*Slot, error) {
+func (u *Unit) Init() error {
+	slot, err := u.IdentifySlot()
+	if err != nil {
+		return err
+	}
+
+	if slot == nil || slot.Provider == nil {
+		return fmt.Errorf("invalid provider for unit %q", u.Name)
+	}
+
+	if strings.HasPrefix(slot.Provider.Type, "docker") {
+		if err := u.populateDockerStatus(slot); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (u *Unit) IdentifySlot() (*slot.Slot, error) {
 	// Short circuit if only a single slot exists.
 	if len(u.Slots) == 0 {
 		return nil, errors.New("unit has no slots")
@@ -163,7 +180,7 @@ func (u *Unit) identifySlot() (*Slot, error) {
 	}
 
 	// Always first identify the default slot
-	var defaultSlot *Slot
+	var defaultSlot *slot.Slot
 	var resolverResults = make([]bool, len(u.Slots))
 	for i, slot := range u.Slots {
 		if slot.IsDefault() {
@@ -186,7 +203,7 @@ func (u *Unit) identifySlot() (*Slot, error) {
 	defaultSlot = &(u.Slots[0])
 
 	// Run through resolvers. Take the last resolved value if any.
-	var resolvedSlot *Slot
+	var resolvedSlot *slot.Slot
 	for i := len(resolverResults) - 1; i >= 0; i-- {
 		if resolverResults[i] {
 			resolvedSlot = &(u.Slots[i])
@@ -200,7 +217,7 @@ func (u *Unit) identifySlot() (*Slot, error) {
 	return defaultSlot, nil
 }
 
-func (u *Unit) populateDockerStatus(slot *Slot) error {
+func (u *Unit) populateDockerStatus(slot *slot.Slot) error {
 	isRemote := slot.Provider.Type == "docker/remote"
 
 	options := []client.Opt{
@@ -223,20 +240,15 @@ func (u *Unit) populateDockerStatus(slot *Slot) error {
 		return err
 	}
 
-	u.Status = &Status{
-		CurrentStatus: Running,
-		CurrentSlot:   slot,
+	u.CurrentSlot = slot
 
-		shutdownRequested: abool.New(),
-		lock:              new(sync.Mutex),
-	}
-	u.Status.shutdownRequested.UnSet()
+	u.SetRunningStatus(status.NewRunningStatus(nil, nil), nil)
 
 	return nil
 }
 
-func (u *Unit) Validate() []*ErrWithPath {
-	var unitErrs []*ErrWithPath
+func (u *Unit) Validate() []*gerrors.ErrWithPath {
+	var unitErrs []*gerrors.ErrWithPath
 	for _, slot := range u.Slots {
 		if errs := slot.Validate(); len(errs) > 0 {
 			for _, err := range errs {
@@ -246,4 +258,36 @@ func (u *Unit) Validate() []*ErrWithPath {
 		}
 	}
 	return unitErrs
+}
+
+func (u *Unit) GetName() string {
+	return u.Name
+}
+
+func (u *Unit) SetRunningStatus(stat *status.Status, cb status.StatusCallback) {
+	u.Status = stat
+	u.Status.ClearShutdown()
+
+	if cb != nil {
+		u.Status.Lock()
+		defer u.Status.Unlock()
+
+		cb(stat)
+	}
+}
+
+func (u *Unit) GetStatus() *status.Status {
+	return u.Status
+}
+
+func (u *Unit) SetCurrentSlot(s *slot.Slot) {
+	u.CurrentSlot = s
+}
+
+func (u *Unit) UnsetCurrentSlot() {
+	u.CurrentSlot = nil
+}
+
+func (u *Unit) InternalStore() *store.Store {
+	return u.Context.InternalStore()
 }
