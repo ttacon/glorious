@@ -15,12 +15,14 @@ require (
 	github.com/flynn-archive/go-shlex v0.0.0-20150515145356-3f9db97f8568 // indirect
 	github.com/fsnotify/fsnotify v1.4.7
 	github.com/gogo/protobuf v1.3.0 // indirect
+	github.com/gorilla/mux v1.7.3 // indirect
 	github.com/hashicorp/hcl v1.0.0
 	github.com/hpcloud/tail v1.0.0
 	github.com/kolo/xmlrpc v0.0.0-20190717152603-07c4ee3fd181 // indirect
 	github.com/kr/text v0.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.2 // indirect
 	github.com/mattn/go-isatty v0.0.9 // indirect
+	github.com/morikuni/aec v1.0.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0-rc1 // indirect
 	github.com/opencontainers/image-spec v1.0.1 // indirect
 	github.com/pkg/errors v0.8.1 // indirect
@@ -30,7 +32,9 @@ require (
 	github.com/ttacon/pretty v0.0.0-20140822010550-4869e1157de7 // indirect
 	golang.org/x/net v0.0.0-20190827160401-ba9fcec4b297 // indirect
 	golang.org/x/sys v0.0.0-20190910064555-bbd175535a8b // indirect
+	golang.org/x/time v0.0.0-20191024005414-555d28b269f0 // indirect
 	google.golang.org/grpc v1.23.0 // indirect
 	gopkg.in/fsnotify.v1 v1.4.7 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
+	gotest.tools v2.2.0+incompatible // indirect
 )

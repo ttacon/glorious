@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"sync"
 
 	"github.com/abiosoft/ishell"
@@ -69,6 +72,30 @@ func (u *Unit) OutputFile() (*os.File, error) {
 		0644,
 	)
 	return f, err
+}
+
+func (u *Unit) SavePIDFile(c *exec.Cmd) error {
+	pid := c.Process.Pid
+	home := os.Getenv("HOME")
+	if len(home) == 0 {
+		return errors.New("cannot determine home directory")
+	}
+
+	outputDir := filepath.Join(home, ".glorious", "state", "pid-files")
+
+	if err := os.MkdirAll(
+		outputDir,
+		0744,
+	); err != nil {
+		return err
+	}
+
+	return ioutil.WriteFile(
+		filepath.Join(outputDir, u.Name),
+		[]byte(strconv.Itoa(pid)),
+		0644,
+	)
+
 }
 
 func (u *Unit) ProcessStatus() string {
