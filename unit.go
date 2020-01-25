@@ -99,6 +99,9 @@ func (u *Unit) SavePIDFile(c *exec.Cmd) error {
 }
 
 func (u *Unit) ProcessStatus() string {
+	slot, _ := u.identifySlot()
+	u.populateDockerStatus(slot)
+
 	if u.Status == nil {
 		return NOT_STARTED
 	}
@@ -218,6 +221,10 @@ func (u *Unit) populateDockerStatus(slot *Slot) error {
 
 	if _, err = cli.ContainerInspect(ctx, u.Name); err != nil {
 		if client.IsErrNotFound(err) {
+			if u.Status != nil {
+				u.Status = nil
+			}
+
 			return nil
 		}
 		return err
