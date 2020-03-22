@@ -1,0 +1,37 @@
+unit "db" {
+  name = "db"
+  description = "Mongo DB"
+
+  slot "dev" {
+    provider {
+      type = "docker/local"
+      image = "mongo:4.2.3-bionic"
+    }
+  }
+}
+
+unit "cache" {
+  name = "cache"
+  description = "Cache for app"
+
+  slot "dev" {
+    provider {
+      type = "docker/local"
+      image = "redis:5"
+    }
+  }
+}
+
+unit "app" {
+  name = "app"
+  description = "application"
+
+  depends_on = [ "db", "cache" ]
+
+  slot "dev" {
+    provider {
+      type = "bash/local"
+      cmd = "npm start"
+    }
+  }
+}
