@@ -34,6 +34,9 @@ type Unit struct {
 	Status      *status.Status
 	CurrentSlot *slot.Slot
 	Context     gcontext.Context
+
+	DependsOnRaw []string `hcl:"depends_on"`
+	DependsOn    []*Unit
 }
 
 func (u *Unit) SetContext(c gcontext.Context) {
@@ -41,7 +44,20 @@ func (u *Unit) SetContext(c gcontext.Context) {
 }
 
 func (u *Unit) Start(ctxt *ishell.Context) error {
-	// now for some tomfoolery
+	// First, see if we have any dependencies that need to be running.
+	if len(u.DependsOn) > 0 {
+		for _, dependency := range u.DependsOn {
+			if dependency.HasStatus(status.Running) {
+				continue
+			}
+
+			if err := dependency.Start(ctxt); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Now, for some tomfoolery
 	slot, err := u.IdentifySlot()
 	if err != nil {
 		return err

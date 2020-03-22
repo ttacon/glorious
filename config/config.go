@@ -35,6 +35,8 @@ func ParseConfigRaw(data []byte) (*GloriousConfig, error) {
 	// For now, we'll solely support docker. Next will be PIDfile based
 	// support.
 	m.Groups = make(map[string][]string)
+	var dependenciesToProcess []*unit.Unit
+
 	for _, unit := range m.Units {
 		if len(unit.Groups) > 0 {
 			for _, group := range unit.Groups {
@@ -43,6 +45,24 @@ func ParseConfigRaw(data []byte) (*GloriousConfig, error) {
 				}
 				m.Groups[group] = append(m.Groups[group], unit.Name)
 			}
+		}
+
+		if len(unit.DependsOnRaw) > 0 {
+			dependenciesToProcess = append(dependenciesToProcess, unit)
+		}
+	}
+
+	for _, unit := range dependenciesToProcess {
+		for _, dep := range unit.DependsOnRaw {
+			identifiedUnit, dependencyExists := (&m).GetUnit(dep)
+			if !dependencyExists {
+				return nil, fmt.Errorf(
+					"invalid dependency %q for unit %q",
+					dep,
+					unit.Name,
+				)
+			}
+			unit.DependsOn = append(unit.DependsOn, identifiedUnit)
 		}
 	}
 
@@ -66,7 +86,7 @@ func (g *GloriousConfig) Validate() []*gerrors.ErrWithPath {
 }
 
 func (g *GloriousConfig) SetContext(c gcontext.Context) {
-	for i, unit := range g.Units {
+	for _, unit := range g.Units {
 		unit.SetContext(c)
 	}
 }
