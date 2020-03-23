@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/abiosoft/ishell"
 	"github.com/docker/docker/client"
 	"github.com/hpcloud/tail"
+	"github.com/sirupsen/logrus"
 	gcontext "github.com/ttacon/glorious/context"
 	gerrors "github.com/ttacon/glorious/errors"
 	"github.com/ttacon/glorious/slot"
@@ -40,7 +40,7 @@ func (u *Unit) SetContext(c gcontext.Context) {
 	u.Context = c
 }
 
-func (u *Unit) Start(ctxt *ishell.Context) error {
+func (u *Unit) Start(lgr *logrus.Logger) error {
 	// now for some tomfoolery
 	slot, err := u.IdentifySlot()
 	if err != nil {
@@ -51,14 +51,14 @@ func (u *Unit) Start(ctxt *ishell.Context) error {
 		return fmt.Errorf("%s is already running", u.Name)
 	}
 
-	return slot.Start(u, ctxt)
+	return slot.Start(u, lgr)
 }
 
-func (u *Unit) Restart(ctxt *ishell.Context) error {
-	if err := u.Stop(ctxt); err != nil {
+func (u *Unit) Restart(lgr *logrus.Logger) error {
+	if err := u.Stop(lgr); err != nil {
 		return err
 	}
-	return u.Start(ctxt)
+	return u.Start(lgr)
 }
 
 func (u *Unit) OutputFile() (*os.File, error) {
@@ -119,7 +119,7 @@ func (u *Unit) HasStatus(status status.UnitStatus) bool {
 	return u.Status != nil && u.Status.CurrentStatus == status
 }
 
-func (u *Unit) Stop(ctxt *ishell.Context) error {
+func (u *Unit) Stop(lgr *logrus.Logger) error {
 	if u.Status == nil {
 		return gerrors.ErrStopStopped
 	}
@@ -133,10 +133,10 @@ func (u *Unit) Stop(ctxt *ishell.Context) error {
 	u.Status.Lock()
 	defer u.Status.Unlock()
 
-	return u.CurrentSlot.Stop(u, ctxt)
+	return u.CurrentSlot.Stop(u, lgr)
 }
 
-func (u *Unit) Tail(ctxt *ishell.Context) error {
+func (u *Unit) Tail(lgr *logrus.Logger) error {
 	if u.ProcessStatus() == NOT_STARTED {
 		return errors.New("cannot tail a stopped process")
 	}
@@ -146,7 +146,7 @@ func (u *Unit) Tail(ctxt *ishell.Context) error {
 		return err
 	}
 	for line := range t.Lines {
-		ctxt.Println(line.Text)
+		lgr.Println(line.Text)
 	}
 
 	return nil

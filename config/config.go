@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io/ioutil"
 
-	"github.com/abiosoft/ishell"
 	"github.com/hashicorp/hcl"
+	"github.com/sirupsen/logrus"
 	gcontext "github.com/ttacon/glorious/context"
 	gerrors "github.com/ttacon/glorious/errors"
 	"github.com/ttacon/glorious/unit"
@@ -66,7 +66,7 @@ func (g *GloriousConfig) Validate() []*gerrors.ErrWithPath {
 }
 
 func (g *GloriousConfig) SetContext(c gcontext.Context) {
-	for i, unit := range g.Units {
+	for _, unit := range g.Units {
 		unit.SetContext(c)
 	}
 }
@@ -127,13 +127,13 @@ func (g *GloriousConfig) GetUnits(args []string) ([]*unit.Unit, error) {
 	return unitsToStart, nil
 }
 
-func (g *GloriousConfig) AssertKeyChange(key string, ctxt *ishell.Context) error {
+func (g *GloriousConfig) AssertKeyChange(key string, lgr *logrus.Logger) error {
 	for _, unit := range g.Units {
 		for _, slot := range unit.Slots {
 			if slot.Resolver["type"] != "keyword/value" {
 				continue
 			} else if slot.Resolver["keyword"] == key {
-				if err := unit.Restart(ctxt); err != nil {
+				if err := unit.Restart(lgr); err != nil {
 					return err
 				}
 			}

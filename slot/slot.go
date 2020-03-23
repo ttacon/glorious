@@ -9,13 +9,13 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/abiosoft/ishell"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"github.com/rjeczalik/notify"
+	"github.com/sirupsen/logrus"
 	gerrors "github.com/ttacon/glorious/errors"
 	"github.com/ttacon/glorious/provider"
 	"github.com/ttacon/glorious/status"
@@ -23,10 +23,10 @@ import (
 )
 
 type Slot struct {
-	Name     string             `hcl:"name"`
-	Provider *provider.Provider `hcl:"provider"`
-	Events   chan notify.EventInfo
-	Resolver map[string]string `hcl:"resolver"`
+	Name     string                `hcl:"name"`
+	Provider *provider.Provider    `hcl:"provider"`
+	Events   chan notify.EventInfo `json:"-"`
+	Resolver map[string]string     `hcl:"resolver"`
 }
 
 type UnitInterface interface {
@@ -40,7 +40,7 @@ type UnitInterface interface {
 	InternalStore() *store.Store
 }
 
-func (s *Slot) Start(u UnitInterface, ctxt *ishell.Context) error {
+func (s *Slot) Start(u UnitInterface, lgr *logrus.Logger) error {
 	providerType := s.Provider.Type
 	if len(providerType) == 0 {
 		return errors.New("no provider given")
@@ -48,19 +48,19 @@ func (s *Slot) Start(u UnitInterface, ctxt *ishell.Context) error {
 
 	switch providerType {
 	case "bash/local":
-		return s.startBashLocal(u, ctxt)
+		return s.startBashLocal(u, lgr)
 	case "bash/remote":
-		return s.startBashRemote(u, ctxt)
+		return s.startBashRemote(u, lgr)
 	case "docker/local":
-		return s.startDockerLocal(u, ctxt)
+		return s.startDockerLocal(u, lgr)
 	case "docker/remote":
-		return s.startDockerRemote(u, ctxt)
+		return s.startDockerRemote(u, lgr)
 	default:
 		return errors.New("unknown provider")
 	}
 }
 
-func (s *Slot) Stop(u UnitInterface, ctxt *ishell.Context) error {
+func (s *Slot) Stop(u UnitInterface, lgr *logrus.Logger) error {
 	providerType := s.Provider.Type
 	if len(providerType) == 0 {
 		return errors.New("no provider given")
@@ -68,13 +68,13 @@ func (s *Slot) Stop(u UnitInterface, ctxt *ishell.Context) error {
 
 	switch providerType {
 	case "bash/local":
-		return s.stopBash(u, ctxt, false)
+		return s.stopBash(u, lgr, false)
 	case "bash/remote":
-		return s.stopBash(u, ctxt, true)
+		return s.stopBash(u, lgr, true)
 	case "docker/local":
-		return s.stopDocker(u, ctxt, false)
+		return s.stopDocker(u, lgr, false)
 	case "docker/remote":
-		return s.stopDocker(u, ctxt, true)
+		return s.stopDocker(u, lgr, true)
 	default:
 		return errors.New("unknown provider for unit, cannot stop, also probably wasn't started")
 	}
@@ -98,15 +98,15 @@ func (s Slot) Resolve(u UnitInterface) (bool, error) {
 	return existingVal == triggerValue, nil
 }
 
-func (s *Slot) startDockerLocal(u UnitInterface, ctxt *ishell.Context) error {
-	return s.startDockerInternal(u, ctxt, false)
+func (s *Slot) startDockerLocal(u UnitInterface, lgr *logrus.Logger) error {
+	return s.startDockerInternal(u, lgr, false)
 }
 
-func (s *Slot) startDockerRemote(u UnitInterface, ctxt *ishell.Context) error {
-	return s.startDockerInternal(u, ctxt, true)
+func (s *Slot) startDockerRemote(u UnitInterface, lgr *logrus.Logger) error {
+	return s.startDockerInternal(u, lgr, true)
 }
 
-func (s *Slot) startDockerInternal(u UnitInterface, ctxt *ishell.Context, remote bool) error {
+func (s *Slot) startDockerInternal(u UnitInterface, lgr *logrus.Logger, remote bool) error {
 	image := s.Provider.Image
 	if len(image) == 0 {
 		return errors.New("no image provided")
@@ -130,7 +130,7 @@ func (s *Slot) startDockerInternal(u UnitInterface, ctxt *ishell.Context, remote
 	_, _, err = cli.ImageInspectWithRaw(ctx, image)
 	if err != nil {
 		if client.IsErrNotFound(err) {
-			ctxt.Println("\nimage not found locally, trying to pull...")
+			lgr.Println("\nimage not found locally, trying to pull...")
 			_, pullErr := cli.ImagePull(
 				ctx,
 				image,
@@ -191,17 +191,17 @@ func (s *Slot) startDockerInternal(u UnitInterface, ctxt *ishell.Context, remote
 	u.SetCurrentSlot(s)
 	u.SetRunningStatus(status.NewRunningStatus(nil, nil), nil)
 
-	ctxt.Println("begun as container ", resp.ID)
+	lgr.Println("begun as container ", resp.ID)
 
 	return nil
 }
 
-func (s *Slot) startBashLocal(u UnitInterface, ctxt *ishell.Context) error {
-	return s.startBashInternal(u, ctxt, false)
+func (s *Slot) startBashLocal(u UnitInterface, lgr *logrus.Logger) error {
+	return s.startBashInternal(u, lgr, false)
 }
 
-func (s *Slot) startBashRemote(u UnitInterface, ctxt *ishell.Context) error {
-	err := s.startBashInternal(u, ctxt, true)
+func (s *Slot) startBashRemote(u UnitInterface, lgr *logrus.Logger) error {
+	err := s.startBashInternal(u, lgr, true)
 	if err != nil {
 		return err
 	}
@@ -212,14 +212,14 @@ func (s *Slot) startBashRemote(u UnitInterface, ctxt *ishell.Context) error {
 	if err != nil {
 		return errors.New("cannot watch files for the provider")
 	}
-	ctxt.Println("started watcher...")
+	lgr.Println("started watcher...")
 	go func() {
 		for {
 			select {
 			case e := <-s.Events:
 				err := s.ExecuteHandlers(e, u)
 				if err != nil {
-					ctxt.Println(err)
+					lgr.Println(err)
 				}
 			}
 		}
@@ -233,7 +233,7 @@ func (s *Slot) startBashRemote(u UnitInterface, ctxt *ishell.Context) error {
 	return nil
 }
 
-func (s *Slot) startBashInternal(u UnitInterface, ctxt *ishell.Context, remote bool) error {
+func (s *Slot) startBashInternal(u UnitInterface, lgr *logrus.Logger, remote bool) error {
 	cmd := s.Provider.Cmd
 	if len(cmd) == 0 {
 		return errors.New("no `cmd` provided")
@@ -272,7 +272,7 @@ func (s *Slot) startBashInternal(u UnitInterface, ctxt *ishell.Context, remote b
 		}(stat)
 	})
 
-	ctxt.Printf("begun as pid %d...\n", c.Process.Pid)
+	lgr.Printf("begun as pid %d...\n", c.Process.Pid)
 
 	return nil
 }
@@ -368,7 +368,7 @@ func (s *Slot) RSync(local string, u UnitInterface) error {
 	return nil
 }
 
-func (s *Slot) stopDocker(u UnitInterface, ctxt *ishell.Context, remote bool) error {
+func (s *Slot) stopDocker(u UnitInterface, lgr *logrus.Logger, remote bool) error {
 	options := []client.Opt{
 		client.FromEnv,
 		client.WithAPIVersionNegotiation(),
@@ -404,7 +404,7 @@ func (s *Slot) stopDocker(u UnitInterface, ctxt *ishell.Context, remote bool) er
 	return nil
 }
 
-func (s *Slot) stopBash(u UnitInterface, ctxt *ishell.Context, remote bool) error {
+func (s *Slot) stopBash(u UnitInterface, lgr *logrus.Logger, remote bool) error {
 	stat := u.GetStatus()
 
 	// It's possible to be beaten here by the goroutine that is

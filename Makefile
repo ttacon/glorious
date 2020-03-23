@@ -6,3 +6,6 @@ build:
 
 run: build
 	./glorious -config $(CONFIG)
+
+agent_bin:
+	go build -o agent.exe ./agent
