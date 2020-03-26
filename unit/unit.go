@@ -44,13 +44,39 @@ func (u *Unit) SetContext(c gcontext.Context) {
 }
 
 func (u *Unit) Start(ctxt *ishell.Context) error {
+	lgr := u.Context.Logger()
+
 	// First, see if we have any dependencies that need to be running.
+	lgr.Debugf("unit %q has %d dependencies\n", u.Name, len(u.DependsOn))
 	if len(u.DependsOn) > 0 {
-		for _, dependency := range u.DependsOn {
+		for i, dependency := range u.DependsOn {
+			preambled := func(s string) string {
+				return "[unit:%d][dependency:%d]" + s
+			}
+
+			lgr.Debugf(
+				preambled(" checking status of dependency: %d\n"),
+				u.Name,
+				i,
+				dependency.Name,
+			)
+
 			if dependency.HasStatus(status.Running) {
+				lgr.Debugf(
+					preambled("dependency %q is running, no action"),
+					u.Name,
+					i,
+					dependency.Name,
+				)
 				continue
 			}
 
+			lgr.Debugf(
+				preambled("starting dependency %q"),
+				u.Name,
+				i,
+				dependency.Name,
+			)
 			if err := dependency.Start(ctxt); err != nil {
 				return err
 			}
@@ -58,6 +84,7 @@ func (u *Unit) Start(ctxt *ishell.Context) error {
 	}
 
 	// Now, for some tomfoolery
+	lgr.Debugf("[unit:%q] identifying slot\n", u.Name)
 	slot, err := u.IdentifySlot()
 	if err != nil {
 		return err
@@ -67,6 +94,7 @@ func (u *Unit) Start(ctxt *ishell.Context) error {
 		return fmt.Errorf("%s is already running", u.Name)
 	}
 
+	lgr.Debugf("[unit:%q] starting slot %q\n", u.Name, slot.Name)
 	return slot.Start(u, ctxt)
 }
 
@@ -125,7 +153,7 @@ func (u *Unit) SavePIDFile(c *exec.Cmd) error {
 }
 
 func (u *Unit) ProcessStatus() string {
-	slot, _ := u.identifySlot()
+	slot, _ := u.IdentifySlot()
 	u.populateDockerStatus(slot)
 
 	if u.Status == nil {
