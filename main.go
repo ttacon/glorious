@@ -7,12 +7,14 @@ import (
 	"strings"
 
 	"github.com/abiosoft/ishell"
+	"github.com/sirupsen/logrus"
 	"github.com/ttacon/glorious/config"
 	"github.com/ttacon/glorious/context"
 )
 
 var (
 	configFileLocation = flag.String("config", "glorious.glorious", "config file location")
+	debugMode          = flag.Bool("debug", false, "run in debug mode")
 
 	contex context.Context
 )
@@ -24,22 +26,29 @@ func init() {
 func main() {
 	flag.Parse()
 
+	if *debugMode {
+		contex.Logger().SetLevel(logrus.DebugLevel)
+	}
+
+	lgr := contex.Logger()
+
+	lgr.Debug("loading config: ", *configFileLocation)
 	conf, err := config.LoadConfig(*configFileLocation)
 	if err != nil {
-		fmt.Println("failed to load config: ", err)
+		lgr.Error("failed to load config: ", err)
 		os.Exit(1)
 	}
 	if errs := conf.Validate(); len(errs) > 0 {
-		fmt.Println("validation errors detected:")
+		lgr.Debug("validation errors detected:")
 		for i, err := range errs {
-			fmt.Printf("[err %d] %s\n", i, err)
+			lgr.Debug("[err %d] %s\n", i, err)
 		}
 		os.Exit(1)
 	}
 
 	conf.SetContext(contex)
 	if err := conf.Init(); err != nil {
-		fmt.Println("failed to initialize config, err: ", err)
+		lgr.Error("failed to initialize config, err: ", err)
 		os.Exit(1)
 	}
 
@@ -54,6 +63,8 @@ func main() {
 		Name: "greet",
 		Help: "greet user",
 		Func: func(c *ishell.Context) {
+			lgr.Debug("command invoked: ", c.Cmd.Name)
+
 			c.Println("Hello", strings.Join(c.Args, " "))
 		},
 	})
@@ -62,6 +73,8 @@ func main() {
 		Name: "config",
 		Help: "Display config information",
 		Func: func(c *ishell.Context) {
+			lgr.Debug("command invoked: ", c.Cmd.Name)
+
 			c.Printf("%-20s| %-9s| Description\n", "Name", "# units")
 			for _, unit := range conf.Units {
 				c.Printf("%-20s| %-9s| %s\n",
@@ -78,6 +91,8 @@ func main() {
 		Name: "status",
 		Help: "Display status information",
 		Func: func(c *ishell.Context) {
+			lgr.Debug("command invoked: ", c.Cmd.Name)
+
 			c.Printf("%-20s|%-20s| %-9s\n", "Name", "Groups", "Status")
 			for _, unit := range conf.Units {
 				c.Printf("%-20s|%-20s| %-9s\n",
@@ -93,6 +108,8 @@ func main() {
 		Name: "reload",
 		Help: "Reload the glorious config",
 		Func: func(c *ishell.Context) {
+			lgr.Debug("command invoked: ", c.Cmd.Name)
+
 			conf, err = config.LoadConfig(*configFileLocation)
 			if err != nil {
 				fmt.Println("failed to reload config: ", err)
@@ -106,6 +123,8 @@ func main() {
 		Name: "start",
 		Help: "Start a given unit",
 		Func: func(c *ishell.Context) {
+			lgr.Debug("command invoked: ", c.Cmd.Name)
+
 			unitsToStart, err := conf.GetUnits(c.Args)
 			if err != nil {
 				fmt.Println(err)
@@ -128,6 +147,8 @@ func main() {
 		Name: "store",
 		Help: "Access the glorious store",
 		Func: func(c *ishell.Context) {
+			lgr.Debug("command invoked: ", c.Cmd.Name)
+
 			c.Println(c.Cmd.HelpText())
 		},
 	}
@@ -135,6 +156,8 @@ func main() {
 		Name: "get",
 		Help: "Return value for given key",
 		Func: func(c *ishell.Context) {
+			lgr.Debug("command invoked: ", c.Cmd.Name)
+
 			if len(c.Args) == 0 {
 				c.Println("must provide key to retrieve value for")
 				return
@@ -153,6 +176,8 @@ func main() {
 		Name: "set",
 		Help: "Stores the key/value pair in the internal store",
 		Func: func(c *ishell.Context) {
+			lgr.Debug("command invoked: ", c.Cmd.Name)
+
 			if len(c.Args) != 2 {
 				c.Println("May only provide a single key value pair")
 				return
@@ -177,6 +202,8 @@ func main() {
 		Name: "stop",
 		Help: "Stops given units",
 		Func: func(c *ishell.Context) {
+			lgr.Debug("command invoked: ", c.Cmd.Name)
+
 			unitsToStart, err := conf.GetUnits(c.Args)
 			if err != nil {
 				fmt.Println(err)
@@ -199,6 +226,8 @@ func main() {
 		Name: "tail",
 		Help: "Tails a unit",
 		Func: func(c *ishell.Context) {
+			lgr.Debug("command invoked: ", c.Cmd.Name)
+
 			// be cheaper if we can
 			unitName := c.Args[0]
 			unit, ok := conf.GetUnit(unitName)
