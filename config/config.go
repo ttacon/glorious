@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io/ioutil"
 
-	"github.com/abiosoft/ishell"
 	"github.com/hashicorp/hcl"
 	gcontext "github.com/ttacon/glorious/context"
 	gerrors "github.com/ttacon/glorious/errors"
@@ -72,6 +71,8 @@ func ParseConfigRaw(data []byte) (*GloriousConfig, error) {
 type GloriousConfig struct {
 	Units  []*unit.Unit `hcl:"unit"`
 	Groups map[string][]string
+
+	contxt gcontext.Context
 }
 
 func (g *GloriousConfig) Validate() []*gerrors.ErrWithPath {
@@ -85,7 +86,13 @@ func (g *GloriousConfig) Validate() []*gerrors.ErrWithPath {
 	return configErrs
 }
 
+func (g *GloriousConfig) GetContext() gcontext.Context {
+	return g.contxt
+}
+
 func (g *GloriousConfig) SetContext(c gcontext.Context) {
+	g.contxt = c
+
 	for _, unit := range g.Units {
 		unit.SetContext(c)
 	}
@@ -147,13 +154,13 @@ func (g *GloriousConfig) GetUnits(args []string) ([]*unit.Unit, error) {
 	return unitsToStart, nil
 }
 
-func (g *GloriousConfig) AssertKeyChange(key string, ctxt *ishell.Context) error {
+func (g *GloriousConfig) AssertKeyChange(key string) error {
 	for _, unit := range g.Units {
 		for _, slot := range unit.Slots {
 			if slot.Resolver["type"] != "keyword/value" {
 				continue
 			} else if slot.Resolver["keyword"] == key {
-				if err := unit.Restart(ctxt); err != nil {
+				if err := unit.Restart(); err != nil {
 					return err
 				}
 			}

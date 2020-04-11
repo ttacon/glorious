@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/abiosoft/ishell"
 	"github.com/docker/docker/client"
 	"github.com/hpcloud/tail"
 	gcontext "github.com/ttacon/glorious/context"
@@ -39,11 +38,15 @@ type Unit struct {
 	DependsOn    []*Unit
 }
 
+func (u *Unit) GetContext() gcontext.Context {
+	return u.Context
+}
+
 func (u *Unit) SetContext(c gcontext.Context) {
 	u.Context = c
 }
 
-func (u *Unit) Start(ctxt *ishell.Context) error {
+func (u *Unit) Start() error {
 	lgr := u.Context.Logger()
 
 	// First, see if we have any dependencies that need to be running.
@@ -77,7 +80,7 @@ func (u *Unit) Start(ctxt *ishell.Context) error {
 				i,
 				dependency.Name,
 			)
-			if err := dependency.Start(ctxt); err != nil {
+			if err := dependency.Start(); err != nil {
 				return err
 			}
 		}
@@ -95,14 +98,14 @@ func (u *Unit) Start(ctxt *ishell.Context) error {
 	}
 
 	lgr.Debugf("[unit:%q] starting slot %q\n", u.Name, slot.Name)
-	return slot.Start(u, ctxt)
+	return slot.Start(u)
 }
 
-func (u *Unit) Restart(ctxt *ishell.Context) error {
-	if err := u.Stop(ctxt); err != nil {
+func (u *Unit) Restart() error {
+	if err := u.Stop(); err != nil {
 		return err
 	}
-	return u.Start(ctxt)
+	return u.Start()
 }
 
 func (u *Unit) OutputFile() (*os.File, error) {
@@ -166,7 +169,7 @@ func (u *Unit) HasStatus(status status.UnitStatus) bool {
 	return u.Status != nil && u.Status.CurrentStatus == status
 }
 
-func (u *Unit) Stop(ctxt *ishell.Context) error {
+func (u *Unit) Stop() error {
 	if u.Status == nil {
 		return gerrors.ErrStopStopped
 	}
@@ -180,10 +183,10 @@ func (u *Unit) Stop(ctxt *ishell.Context) error {
 	u.Status.Lock()
 	defer u.Status.Unlock()
 
-	return u.CurrentSlot.Stop(u, ctxt)
+	return u.CurrentSlot.Stop(u)
 }
 
-func (u *Unit) Tail(ctxt *ishell.Context) error {
+func (u *Unit) Tail() error {
 	if u.ProcessStatus() == NOT_STARTED {
 		return errors.New("cannot tail a stopped process")
 	}
@@ -192,8 +195,10 @@ func (u *Unit) Tail(ctxt *ishell.Context) error {
 	if err != nil {
 		return err
 	}
+
+	lgr := u.GetContext().Logger()
 	for line := range t.Lines {
-		ctxt.Println(line.Text)
+		lgr.Info(line.Text)
 	}
 
 	return nil

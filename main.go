@@ -3,11 +3,13 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/rpc/jsonrpc"
 	"os"
 	"strings"
 
 	"github.com/abiosoft/ishell"
 	"github.com/sirupsen/logrus"
+	"github.com/ttacon/glorious/agent"
 	"github.com/ttacon/glorious/config"
 	"github.com/ttacon/glorious/context"
 )
@@ -15,6 +17,7 @@ import (
 var (
 	configFileLocation = flag.String("config", "glorious.glorious", "config file location")
 	debugMode          = flag.Bool("debug", false, "run in debug mode")
+	daemonMode         = flag.Bool("daemon", false, "run as daemon")
 
 	contex context.Context
 )
@@ -58,6 +61,22 @@ func main() {
 	// display welcome info.
 	shell.Println(banner)
 
+	agnt := agent.NewAgent(conf, *configFileLocation, lgr)
+
+	if *daemonMode {
+		if err := runServer(agnt); err != nil {
+			lgr.Error(err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	client, err := jsonrpc.Dial("tcp", ":7777")
+	if err != nil {
+		lgr.Error(err)
+		os.Exit(1)
+	}
+
 	// register a function for "greet" command.
 	shell.AddCmd(&ishell.Cmd{
 		Name: "greet",
@@ -65,7 +84,13 @@ func main() {
 		Func: func(c *ishell.Context) {
 			lgr.Debug("command invoked: ", c.Cmd.Name)
 
-			c.Println("Hello", strings.Join(c.Args, " "))
+			var greeting string
+			if err := client.Call("Agent.Greet", c.Args, &greeting); err != nil {
+				lgr.Error(err)
+				return
+			}
+
+			c.Println(greeting)
 		},
 	})
 
@@ -75,11 +100,17 @@ func main() {
 		Func: func(c *ishell.Context) {
 			lgr.Debug("command invoked: ", c.Cmd.Name)
 
+			var units []agent.UnitConfig
+			if err := client.Call("Agent.Config", struct{}{}, &units); err != nil {
+				lgr.Error(err)
+				return
+			}
+
 			c.Printf("%-20s| %-9s| Description\n", "Name", "# units")
-			for _, unit := range conf.Units {
+			for _, unit := range units {
 				c.Printf("%-20s| %-9s| %s\n",
 					unit.Name,
-					fmt.Sprintf("%d units", len(unit.Slots)),
+					fmt.Sprintf("%d units", unit.NumSlots),
 					unit.Description,
 				)
 			}
@@ -93,12 +124,18 @@ func main() {
 		Func: func(c *ishell.Context) {
 			lgr.Debug("command invoked: ", c.Cmd.Name)
 
+			var units []agent.UnitStatus
+			if err := client.Call("Agent.Status", struct{}{}, &units); err != nil {
+				lgr.Error(err)
+				return
+			}
+
 			c.Printf("%-20s|%-20s| %-9s\n", "Name", "Groups", "Status")
-			for _, unit := range conf.Units {
+			for _, unit := range units {
 				c.Printf("%-20s|%-20s| %-9s\n",
 					unit.Name,
 					strings.Join(unit.Groups, ", "),
-					unit.ProcessStatus(),
+					unit.Status,
 				)
 			}
 		},
@@ -110,9 +147,12 @@ func main() {
 		Func: func(c *ishell.Context) {
 			lgr.Debug("command invoked: ", c.Cmd.Name)
 
-			conf, err = config.LoadConfig(*configFileLocation)
-			if err != nil {
-				fmt.Println("failed to reload config: ", err)
+			var respErr error
+			if err := client.Call("Agent.Reload", struct{}{}, &respErr); err != nil {
+				lgr.Error(err)
+				return
+			} else if respErr != nil {
+				lgr.Error(err)
 				return
 			}
 			c.Printf("Reloaded glorious config from %s\n", *configFileLocation)
@@ -125,20 +165,19 @@ func main() {
 		Func: func(c *ishell.Context) {
 			lgr.Debug("command invoked: ", c.Cmd.Name)
 
-			unitsToStart, err := conf.GetUnits(c.Args)
-			if err != nil {
-				fmt.Println(err)
-				return
-			}
+			for _, arg := range c.Args {
+				c.Printf("starting %q...\n", arg)
 
-			for _, unit := range unitsToStart {
-				c.Printf("starting %q...\n", unit.Name)
-
-				if err := unit.Start(c); err != nil {
-					fmt.Println(err)
+				var respErr error
+				if err := client.Call(
+					"Agent.StartUnit",
+					arg,
+					&respErr,
+				); err != nil {
+					c.Println(err)
+				} else {
+					c.Println("done")
 				}
-
-				c.Println("done")
 			}
 		},
 	})
@@ -163,12 +202,22 @@ func main() {
 				return
 			}
 
-			for _, key := range c.Args {
-				val, err := contex.InternalStore().GetInternalStoreVal(key)
-				if err != nil {
-					val = "(not found)"
-				}
-				c.Printf("%q: %q\n", key, val)
+			req := agent.StoreGetValuesRequest{
+				Keys: c.Args,
+			}
+			var resp agent.StoreGetValuesResponse
+
+			if err := client.Call(
+				"Agent.StoreGetValues",
+				&req,
+				&resp,
+			); err != nil {
+				c.Println(err)
+				return
+			}
+
+			for key, value := range resp.Values {
+				c.Printf("%q: %q\n", key, value)
 			}
 		},
 	})
@@ -183,16 +232,22 @@ func main() {
 				return
 			}
 
-			if err := contex.InternalStore().PutInternalStoreVal(
-				c.Args[0],
-				c.Args[1],
+			req := agent.StorePutValueRequest{
+				Key:   c.Args[0],
+				Value: c.Args[1],
+			}
+			var resp agent.ErrResponse
+
+			if err := client.Call(
+				"Agent.StorePutValue",
+				&req,
+				&resp,
 			); err != nil {
 				c.Println(err)
 				return
-			}
-
-			if err := conf.AssertKeyChange(c.Args[0], c); err != nil {
-				c.Println(err)
+			} else if resp.Err != nil {
+				c.Println(resp.Err)
+				return
 			}
 		},
 	})
@@ -213,7 +268,7 @@ func main() {
 			for _, unit := range unitsToStart {
 				c.Printf("stopping %q...", unit.Name)
 
-				if err := unit.Stop(c); err != nil {
+				if err := unit.Stop(); err != nil {
 					fmt.Println(err)
 				}
 
@@ -238,7 +293,7 @@ func main() {
 
 			// if there are no more args, run a following tail, if
 			// there's a number, run a number sliced tail
-			if err := unit.Tail(c); err != nil {
+			if err := unit.Tail(); err != nil {
 				c.Println(err)
 			}
 		},
