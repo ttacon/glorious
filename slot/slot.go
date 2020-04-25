@@ -108,7 +108,6 @@ func (s *Slot) startDockerRemote(u UnitInterface) error {
 }
 
 func (s *Slot) startDockerInternal(u UnitInterface, remote bool) error {
-
 	image := s.Provider.Image
 	if len(image) == 0 {
 		return errors.New("no image provided")
@@ -134,26 +133,47 @@ func (s *Slot) startDockerInternal(u UnitInterface, remote bool) error {
 	_, _, err = cli.ImageInspectWithRaw(ctx, image)
 	if err != nil {
 		if client.IsErrNotFound(err) {
-			lgr.Info("\nimage not found locally, trying to pull...")
-			_, pullErr := cli.ImagePull(
-				ctx,
+			lgr.Infof("image %q not found locally, trying to pull...", image)
+			d, pullErr := cli.ImagePull(
+				context.Background(),
 				image,
 				types.ImagePullOptions{},
 			)
 			if pullErr != nil {
+				lgr.Debug("failed to pull image: ", image)
 				return pullErr
 			}
+
+			if resp, err := cli.ImageLoad(
+				context.Background(),
+				d,
+				false,
+			); err != nil {
+				lgr.Debug("failed to load retrieved image, err: ", err)
+				return err
+			} else if err := resp.Body.Close(); err != nil {
+				lgr.Debug("failed to closed response body, err: ", err)
+				return err
+			}
+
+			if err := d.Close(); err != nil {
+				lgr.Debug("failed to close pull request, err: ", err)
+				return err
+			}
 		} else {
+			lgr.Debug("failed to check for image: ", err)
 			return err
 		}
 	}
 
+	lgr.Debug("parsing host ports")
 	hostConfig := &container.HostConfig{}
 	if len(s.Provider.Ports) > 0 {
 		bindings := nat.PortMap{}
 		for _, port := range s.Provider.Ports {
 			vals, err := nat.ParsePortSpec(port)
 			if err != nil {
+				lgr.Debug("failed to parse port spec: ", err)
 				return err
 			}
 			for _, val := range vals {
@@ -163,6 +183,7 @@ func (s *Slot) startDockerInternal(u UnitInterface, remote bool) error {
 		hostConfig.PortBindings = bindings
 	}
 
+	lgr.Debug("parsing host volumes")
 	if len(s.Provider.Volumes) > 0 {
 		mounts := make([]mount.Mount, len(s.Provider.Volumes))
 		for i, volume := range s.Provider.Volumes {
@@ -176,19 +197,23 @@ func (s *Slot) startDockerInternal(u UnitInterface, remote bool) error {
 		hostConfig.Mounts = mounts
 	}
 
+	lgr.Debug("creating container for image: ", image)
 	resp, err := cli.ContainerCreate(ctx, &container.Config{
 		Image: image,
 		Env:   s.Provider.Environment,
 	}, hostConfig, nil, u.GetName())
 	if err != nil {
+		lgr.Debugf("failed to create container for image %q, err %s\n", image, err)
 		return err
 	}
 
+	lgr.Debug("starting container for image: ", image)
 	if err := cli.ContainerStart(
 		ctx,
 		resp.ID,
 		types.ContainerStartOptions{},
 	); err != nil {
+		lgr.Debugf("failed to start container for image %q, err %s\n", image, err)
 		return err
 	}
 

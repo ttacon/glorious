@@ -39,3 +39,19 @@ unit "haproxy" {
           }
      }
 }
+
+unit "redis" {
+  name = "redis"
+  description = "cuz redis"
+
+  slot "image" {
+    provider {
+      type = "docker/local"
+      image = "redis:5.0"
+
+      ports = [
+        "16379:6379"
+      ]
+    }
+  }
+}

@@ -16,4 +16,4 @@ send:
 	scp -i ~/.ssh/id_rsa glo.linux root@134.209.164.241:~/glo
 
 send-config:
-	scp -i ~/.ssh/id_rsa examples/simple.glrs root@134.209.164.241:~/simple.hcl
+	scp -i ~/.ssh/id_rsa examples/simple.hcl root@134.209.164.241:~/simple.hcl
