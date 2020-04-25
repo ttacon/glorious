@@ -1,4 +1,6 @@
 
+include makefile-extensions/*.mk
+
 CONFIG ?= glorious.glorious
 
 build: build-macos build-linux
@@ -12,8 +14,3 @@ build-macos:
 build-linux:
 	GOOS=linux go build -o glo.linux .
 
-send:
-	scp -i ~/.ssh/id_rsa glo.linux root@134.209.164.241:~/glo
-
-send-config:
-	scp -i ~/.ssh/id_rsa examples/simple.glrs root@134.209.164.241:~/simple.hcl
