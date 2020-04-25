@@ -9,10 +9,10 @@ import (
 	"github.com/ttacon/glorious/agent"
 )
 
-func runServer(agnt *agent.Agent) error {
+func runServer(agnt *agent.Agent, addr string) error {
 	server := rpc.NewServer()
 	server.Register(agnt)
-	listener, e := net.Listen("tcp", ":7777")
+	listener, e := net.Listen("tcp", addr)
 	if e != nil {
 		log.Fatal("listen error:", e)
 	}

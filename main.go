@@ -18,6 +18,7 @@ var (
 	configFileLocation = flag.String("config", "glorious.glorious", "config file location")
 	debugMode          = flag.Bool("debug", false, "run in debug mode")
 	daemonMode         = flag.Bool("daemon", false, "run as daemon")
+	addr               = flag.String("addr", ":7777", "The address to connect to")
 
 	contex context.Context
 )
@@ -50,10 +51,6 @@ func main() {
 	}
 
 	conf.SetContext(contex)
-	if err := conf.Init(); err != nil {
-		lgr.Error("failed to initialize config, err: ", err)
-		os.Exit(1)
-	}
 
 	shell := ishell.New()
 	shell.SetHomeHistoryPath(".glorious/history")
@@ -64,14 +61,19 @@ func main() {
 	agnt := agent.NewAgent(conf, *configFileLocation, lgr)
 
 	if *daemonMode {
-		if err := runServer(agnt); err != nil {
+		if err := conf.Init(); err != nil {
+			lgr.Error("failed to initialize config, err: ", err)
+			os.Exit(1)
+		}
+
+		if err := runServer(agnt, *addr); err != nil {
 			lgr.Error(err)
 			os.Exit(1)
 		}
 		return
 	}
 
-	client, err := jsonrpc.Dial("tcp", ":7777")
+	client, err := jsonrpc.Dial("tcp", *addr)
 	if err != nil {
 		lgr.Error(err)
 		os.Exit(1)
