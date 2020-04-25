@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -67,15 +66,30 @@ func (a *Agent) Reload(_ struct{}, err *error) error {
 	return nil
 }
 
-func (a *Agent) StartUnit(unitName string, err *error) error {
+func (a *Agent) StartUnit(unitName string, err *string) error {
 	debugRemoteCallStart(a.lgr, "StartUnit")
 
 	unit, exists := a.conf.GetUnit(unitName)
 	if !exists {
-		*err = errors.New("unknown unit")
+		*err = "unknown unit"
 		return nil
 	} else if startErr := unit.Start(); startErr != nil {
-		*err = startErr
+		*err = startErr.Error()
+		return nil
+	}
+
+	return nil
+}
+
+func (a *Agent) StopUnit(unitName string, err *string) error {
+	debugRemoteCallStart(a.lgr, "StopUnit")
+
+	unit, exists := a.conf.GetUnit(unitName)
+	if !exists {
+		*err = "unknown unit"
+		return nil
+	} else if stopErr := unit.Stop(); stopErr != nil {
+		*err = stopErr.Error()
 		return nil
 	}
 
@@ -86,7 +100,9 @@ func (a *Agent) StorePutValue(req StorePutValueRequest, resp *ErrResponse) error
 	debugRemoteCallStart(a.lgr, "StorePutValue")
 
 	store := a.conf.GetContext().InternalStore()
-	resp.Err = store.PutInternalStoreVal(req.Key, req.Value)
+	if err := store.PutInternalStoreVal(req.Key, req.Value); err != nil {
+		resp.Err = err.Error()
+	}
 	return nil
 }
 
@@ -96,7 +112,7 @@ type StorePutValueRequest struct {
 }
 
 type ErrResponse struct {
-	Err error
+	Err string
 }
 
 func (a *Agent) StoreGetValues(req *StoreGetValuesRequest, resp *StoreGetValuesResponse) error {

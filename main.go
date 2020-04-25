@@ -168,13 +168,15 @@ func main() {
 			for _, arg := range c.Args {
 				c.Printf("starting %q...\n", arg)
 
-				var respErr error
+				var respErr string
 				if err := client.Call(
 					"Agent.StartUnit",
 					arg,
 					&respErr,
 				); err != nil {
 					c.Println(err)
+				} else if len(respErr) > 0 {
+					c.Println(respErr)
 				} else {
 					c.Println("done")
 				}
@@ -245,7 +247,7 @@ func main() {
 			); err != nil {
 				c.Println(err)
 				return
-			} else if resp.Err != nil {
+			} else if len(resp.Err) > 0 {
 				c.Println(resp.Err)
 				return
 			}
@@ -259,20 +261,21 @@ func main() {
 		Func: func(c *ishell.Context) {
 			lgr.Debug("command invoked: ", c.Cmd.Name)
 
-			unitsToStart, err := conf.GetUnits(c.Args)
-			if err != nil {
-				fmt.Println(err)
-				return
-			}
+			for _, arg := range c.Args {
+				c.Printf("stopping %q...", arg)
 
-			for _, unit := range unitsToStart {
-				c.Printf("stopping %q...", unit.Name)
-
-				if err := unit.Stop(); err != nil {
-					fmt.Println(err)
+				var respErr string
+				if err := client.Call(
+					"Agent.StopUnit",
+					arg,
+					&respErr,
+				); err != nil {
+					c.Println(err)
+				} else if len(respErr) > 0 {
+					c.Println(respErr)
+				} else {
+					c.Println("done")
 				}
-
-				c.Println("done")
 			}
 		},
 	})
