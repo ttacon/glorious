@@ -8,4 +8,8 @@ before:
     - go mod download
 
 builds:
-- binary: glo
+-
+  binary: glo
+  goarch:
+  - amd64
+
