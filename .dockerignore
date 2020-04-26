@@ -1,0 +1,14 @@
+*
+!/main.go
+!/go.mod
+!/go.sum
+!/agent
+!/config
+!/context
+!/errors
+!/provider
+!/server.go
+!/slot
+!/status
+!/store
+!/unit
