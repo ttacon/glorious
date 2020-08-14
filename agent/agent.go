@@ -106,6 +106,19 @@ func (a *Agent) StorePutValue(req StorePutValueRequest, resp *ErrResponse) error
 	return nil
 }
 
+func (a *Agent) Logger() context.Logger {
+	return a.lgr
+}
+
+func (a *Agent) Conf() *config.GloriousConfig {
+	return a.conf
+}
+
+func (a *Agent) ExchangeTailToken(token string) ([]string, bool) {
+	names, ok := a.conf.ExchangeTailToken(token)
+	return names, ok
+}
+
 type StorePutValueRequest struct {
 	Key   string
 	Value string
@@ -129,6 +142,43 @@ func (a *Agent) StoreGetValues(req *StoreGetValuesRequest, resp *StoreGetValuesR
 		resp.Values[key] = val
 	}
 	return nil
+}
+
+func (a *Agent) TailProcesses(req *TailProcessesRequest, resp *TailProcessesResponse) error {
+	debugRemoteCallStart(a.lgr, "TailProcesses")
+
+	if len(req.Names) == 0 {
+		resp.Err = "no names provided"
+		return nil
+	}
+
+	// Validate all names are valid units
+	var invalidNames []string
+	for _, name := range req.Names {
+		_, exists := a.conf.GetUnit(name)
+		if !exists {
+			invalidNames = append(invalidNames, name)
+		}
+	}
+	if len(invalidNames) > 0 {
+		resp.Err = fmt.Sprintf(
+			"invalid names: %s",
+			strings.Join(invalidNames, ", "),
+		)
+		return nil
+	}
+
+	resp.Token = a.conf.CreateTailProcessToken(req.Names)
+	return nil
+}
+
+type TailProcessesRequest struct {
+	Names []string
+}
+
+type TailProcessesResponse struct {
+	Token string
+	Err   string
 }
 
 type StoreGetValuesRequest struct {

@@ -3,8 +3,11 @@ package config
 import (
 	"fmt"
 	"io/ioutil"
+	"sync"
+	"time"
 
 	"github.com/hashicorp/hcl"
+	"github.com/satori/go.uuid"
 	gcontext "github.com/ttacon/glorious/context"
 	gerrors "github.com/ttacon/glorious/errors"
 	"github.com/ttacon/glorious/unit"
@@ -65,6 +68,8 @@ func ParseConfigRaw(data []byte) (*GloriousConfig, error) {
 		}
 	}
 
+	(&m).initTailGroupProcessing()
+
 	return &m, nil
 }
 
@@ -73,6 +78,64 @@ type GloriousConfig struct {
 	Groups map[string][]string
 
 	contxt gcontext.Context
+
+	tailGroupMux *sync.Mutex
+	tailGroups   map[string]*tailProcessState
+}
+
+func (g *GloriousConfig) initTailGroupProcessing() {
+	g.tailGroupMux = new(sync.Mutex)
+	g.tailGroups = make(map[string]*tailProcessState)
+
+	go g.cleanupOldTailGroups()
+}
+
+func (g *GloriousConfig) ExchangeTailToken(token string) ([]string, bool) {
+	g.tailGroupMux.Lock()
+
+	state, ok := g.tailGroups[token]
+	if !ok {
+		g.tailGroupMux.Unlock()
+		return nil, ok
+	}
+
+	names := state.names
+	delete(g.tailGroups, token)
+
+	g.tailGroupMux.Unlock()
+
+	return names, ok
+}
+
+func (g *GloriousConfig) cleanupOldTailGroups() {
+	ticker := time.NewTimer(time.Minute * 5)
+	for {
+		<-ticker.C
+
+		g.tailGroupMux.Lock()
+		for token, state := range g.tailGroups {
+			if state.createdAt.Add(time.Hour).After(time.Now()) {
+				delete(g.tailGroups, token)
+			}
+		}
+		g.tailGroupMux.Unlock()
+	}
+}
+
+type tailProcessState struct {
+	names     []string
+	createdAt time.Time
+}
+
+func (g *GloriousConfig) CreateTailProcessToken(names []string) string {
+	g.tailGroupMux.Lock()
+	token := uuid.NewV4().String()
+	g.tailGroups[token] = &tailProcessState{
+		names:     names,
+		createdAt: time.Now(),
+	}
+	g.tailGroupMux.Unlock()
+	return token
 }
 
 func (g *GloriousConfig) Validate() []*gerrors.ErrWithPath {

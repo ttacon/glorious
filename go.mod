@@ -29,9 +29,11 @@ require (
 	github.com/opencontainers/image-spec v1.0.1 // indirect
 	github.com/pkg/errors v0.8.1 // indirect
 	github.com/rjeczalik/notify v0.9.2
+	github.com/satori/go.uuid v1.2.0
 	github.com/sirupsen/logrus v1.4.2
 	github.com/tevino/abool v0.0.0-20170917061928-9b9efcf221b5
 	github.com/ttacon/pretty v0.0.0-20140822010550-4869e1157de7 // indirect
+	golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2
 	golang.org/x/net v0.0.0-20190827160401-ba9fcec4b297 // indirect
 	golang.org/x/sys v0.0.0-20190910064555-bbd175535a8b // indirect
 	golang.org/x/time v0.0.0-20191024005414-555d28b269f0 // indirect
