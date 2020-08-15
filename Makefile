@@ -1,5 +1,4 @@
 
-include makefile-extensions/*.mk
 
 CONFIG ?= glorious.glorious
 

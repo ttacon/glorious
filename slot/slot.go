@@ -2,6 +2,8 @@ package slot
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -9,10 +11,13 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/ecr"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/errdefs"
 	"github.com/docker/go-connections/nat"
 	"github.com/rjeczalik/notify"
 	gcontext "github.com/ttacon/glorious/context"
@@ -134,14 +139,51 @@ func (s *Slot) startDockerInternal(u UnitInterface, remote bool) error {
 	if err != nil {
 		if client.IsErrNotFound(err) {
 			lgr.Infof("image %q not found locally, trying to pull...", image)
+
 			d, pullErr := cli.ImagePull(
 				context.Background(),
 				image,
 				types.ImagePullOptions{},
 			)
 			if pullErr != nil {
-				lgr.Debug("failed to pull image: ", image)
-				return pullErr
+				lgr.Debug("failed to pull image, determining if we'll retry with authentication")
+				var authFunc func(gcontext.Logger) types.RequestPrivilegeFunc
+				if s.Provider.Extra != nil {
+					lgr.Debug("provider has extra configuration information")
+					if funcType, ok := s.Provider.Extra["authProvider"]; ok && funcType == "aws/ecr" {
+						lgr.Debug("identified authProvider of aws/ecr")
+						authFunc = awsAuthFunc
+					}
+				}
+
+				// Moby misinterprets AWS ECR unauthorized responses, so augment our ability to
+				// determine the failure reason.
+				isUnauthorized := errdefs.IsUnauthorized(pullErr) ||
+					strings.Contains(pullErr.Error(), "no basic auth credentials")
+				lgr.Debug("pull failure was lack of authorization: ", errdefs.IsUnauthorized(pullErr))
+				if !isUnauthorized && authFunc != nil {
+					lgr.Debug("failed to pull image: ", image)
+					return pullErr
+				}
+
+				lgr.Debug("attempting to pull image with PrivilegeFunc")
+				token, err := authFunc(lgr)()
+				if err != nil {
+					lgr.Debug("failed to pull image: ", image)
+					return pullErr
+				}
+				d, pullErr = cli.ImagePull(
+					context.Background(),
+					image,
+					types.ImagePullOptions{
+						RegistryAuth:  token,
+						PrivilegeFunc: authFunc(lgr),
+					},
+				)
+				if pullErr != nil {
+					lgr.Debug("failed to pull image: ", image)
+					return pullErr
+				}
 			}
 
 			if resp, err := cli.ImageLoad(
@@ -223,6 +265,48 @@ func (s *Slot) startDockerInternal(u UnitInterface, remote bool) error {
 	lgr.Info("begun as container ", resp.ID)
 
 	return nil
+}
+
+func awsAuthFunc(lgr gcontext.Logger) types.RequestPrivilegeFunc {
+	return func() (string, error) {
+		lgr.Debug("generating AWS SDK client")
+		sesh, err := session.NewSessionWithOptions(session.Options{
+			SharedConfigState: session.SharedConfigEnable,
+		})
+		if err != nil {
+			lgr.Debug("failed to generate AWS session: ", err)
+			return "", err
+		}
+		svc := ecr.New(sesh)
+
+		// TODO(ttacon): support specifying the registry.
+		// https://docs.aws.amazon.com/sdk-for-go/api/service/ecr/#GetAuthorizationTokenInput
+		// https://docs.aws.amazon.com/sdk-for-go/api/service/ecr/#ECR.GetAuthorizationToken
+		lgr.Debug("requesting ECR authentication token")
+		result, err := svc.GetAuthorizationToken(&ecr.GetAuthorizationTokenInput{})
+		if err != nil {
+			lgr.Debug("failed to retrieve authorization token: ", err)
+			return "", err
+		} else if len(result.AuthorizationData) == 0 {
+			lgr.Debug("ECR authorization response had no authorization data")
+			return "", errors.New("no valid authorization returned")
+		}
+
+		lgr.Debug("ECR returned authorization data", len(result.AuthorizationData))
+		token := *result.AuthorizationData[0].AuthorizationToken
+		decodedToken, err := base64.StdEncoding.DecodeString(token)
+		if err != nil {
+			return "", err
+		}
+
+		parts := strings.Split(string(decodedToken), ":")
+
+		rawJSON, _ := json.Marshal(map[string]string{
+			"username": parts[0],
+			"password": parts[1],
+		})
+		return base64.StdEncoding.EncodeToString(rawJSON), nil
+	}
 }
 
 func (s *Slot) startBashLocal(u UnitInterface) error {
@@ -358,6 +442,16 @@ func (s *Slot) ExecuteHandlers(e notify.EventInfo, u UnitInterface) error {
 
 func (s *Slot) BashCmd(cmd string, remote bool) (exec.Cmd, error) {
 	pieces := strings.Split(cmd, " ")
+
+	// Test if this is path-like first, if not, try to resolve it.
+	path, err := exec.LookPath(pieces[0])
+	if err != nil {
+		fmt.Printf("failed to lookup %q: %v\n", pieces[0], err)
+	} else {
+		fmt.Printf("resolved %q to %q\n", pieces[0], path)
+		pieces[0] = path
+	}
+
 	if remote == false {
 		c := exec.Cmd{}
 		c.Dir = s.Provider.WorkingDir

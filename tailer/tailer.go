@@ -53,8 +53,12 @@ func (t *tailer) Handle(conn net.Conn) {
 	shutdownChan := make(chan struct{}, len(names))
 
 	for _, name := range names {
-
+		t.streamFor(name, dataChan, shutdownChan, closeChan)
 	}
+
+	// Read from dataChan
+
+	// moar?
 }
 
 func (t *tailer) streamFor(
@@ -63,14 +67,14 @@ func (t *tailer) streamFor(
 	shutdownChan chan struct{},
 	closeChan chan string,
 ) {
-	stopFn, err := t.agnt.Config() // stopped here
+	//	stopFn, err := t.agnt.Config() // stopped here
 
 	for {
 		select {
 		case <-shutdownChan:
 			closeChan <- name
 			return
-		case <-time.After:
+		case <-time.After(time.Second):
 			// Get data!!!!
 
 		}

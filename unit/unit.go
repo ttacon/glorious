@@ -188,7 +188,7 @@ func (u *Unit) Stop() error {
 
 func (u *Unit) TailWithChan(dataChan chan []byte) (func(), error) {
 	if u.ProcessStatus() == NOT_STARTED {
-		return errors.New("cannot tail a stopped process")
+		return nil, errors.New("cannot tail a stopped process")
 	}
 
 	slot, err := u.IdentifySlot()
@@ -199,12 +199,12 @@ func (u *Unit) TailWithChan(dataChan chan []byte) (func(), error) {
 	if strings.HasPrefix(slot.Provider.Type, "bash") {
 		t, err := tail.TailFile(u.Status.OutFile.Name(), tail.Config{Follow: true})
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		go func() {
-			for line := range t.Lines() {
-				dataChan <- []byte(line)
+			for line := range t.Lines {
+				dataChan <- []byte(line.Text)
 			}
 		}()
 
