@@ -186,6 +186,36 @@ func (u *Unit) Stop() error {
 	return u.CurrentSlot.Stop(u)
 }
 
+func (u *Unit) TailWithChan(dataChan chan []byte) (func(), error) {
+	if u.ProcessStatus() == NOT_STARTED {
+		return nil, errors.New("cannot tail a stopped process")
+	}
+
+	slot, err := u.IdentifySlot()
+	if err != nil {
+		return nil, err
+	}
+
+	if strings.HasPrefix(slot.Provider.Type, "bash") {
+		t, err := tail.TailFile(u.Status.OutFile.Name(), tail.Config{Follow: true})
+		if err != nil {
+			return nil, err
+		}
+
+		go func() {
+			for line := range t.Lines {
+				dataChan <- []byte(line.Text)
+			}
+		}()
+
+		return func() {
+			t.Stop()
+		}, nil
+
+	}
+	return nil, errors.New("provider not currently supported: " + slot.Provider.Type)
+}
+
 func (u *Unit) Tail() error {
 	if u.ProcessStatus() == NOT_STARTED {
 		return errors.New("cannot tail a stopped process")

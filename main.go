@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net"
 	"net/rpc/jsonrpc"
 	"os"
 	"strings"
@@ -21,6 +22,9 @@ var (
 	addr               = flag.String("addr", ":7777", "The address to connect to")
 
 	contex context.Context
+
+	MAGIC_COOKIE_V1      = []byte{0x00, 0x00, 0x01, 0x00}
+	MAGIC_COOKIE_V1_LOGS = []byte{0x00, 0x00, 0x01, 0x01}
 )
 
 func init() {
@@ -66,18 +70,32 @@ func main() {
 			os.Exit(1)
 		}
 
-		if err := runServer(agnt, *addr); err != nil {
+		if err := runServer(agnt, *addr, lgr); err != nil {
 			lgr.Error(err)
 			os.Exit(1)
 		}
 		return
 	}
 
-	client, err := jsonrpc.Dial("tcp", *addr)
+	conn, err := net.Dial("tcp", *addr)
 	if err != nil {
 		lgr.Error(err)
 		os.Exit(1)
 	}
+
+	if n, err := conn.Write(MAGIC_COOKIE_V1); err != nil {
+		lgr.Error(err)
+		os.Exit(1)
+	} else if n != len(MAGIC_COOKIE_V1) {
+		lgr.Errorf(
+			"failed to write all of the magic cookie, wrote %d of %d bytes\n",
+			n,
+			len(MAGIC_COOKIE_V1),
+		)
+		os.Exit(1)
+	}
+
+	client := jsonrpc.NewClient(conn)
 
 	// register a function for "greet" command.
 	shell.AddCmd(&ishell.Cmd{

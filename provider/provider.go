@@ -17,6 +17,8 @@ type Provider struct {
 
 	Remote   RemoteInfo    `hcl:"remote"`
 	Handlers []HandlerInfo `hcl:"handler"`
+
+	Extra map[string]interface{} `hcl:"extra"`
 }
 
 func (p *Provider) Validate() []error {
