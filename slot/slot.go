@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ecr"
 	"github.com/docker/docker/api/types"
@@ -138,52 +139,20 @@ func (s *Slot) startDockerInternal(u UnitInterface, remote bool) error {
 	_, _, err = cli.ImageInspectWithRaw(ctx, image)
 	if err != nil {
 		if client.IsErrNotFound(err) {
+			image = s.getImageString(u, image)
 			lgr.Infof("image %q not found locally, trying to pull...", image)
 
 			d, pullErr := cli.ImagePull(
 				context.Background(),
 				image,
-				types.ImagePullOptions{},
+				s.dockerImagePullOptions(u),
 			)
 			if pullErr != nil {
-				lgr.Debug("failed to pull image, determining if we'll retry with authentication")
-				var authFunc func(gcontext.Logger) types.RequestPrivilegeFunc
-				if s.Provider.Extra != nil {
-					lgr.Debug("provider has extra configuration information")
-					if funcType, ok := s.Provider.Extra["authProvider"]; ok && funcType == "aws/ecr" {
-						lgr.Debug("identified authProvider of aws/ecr")
-						authFunc = awsAuthFunc
-					}
-				}
-
-				// Moby misinterprets AWS ECR unauthorized responses, so augment our ability to
-				// determine the failure reason.
 				isUnauthorized := errdefs.IsUnauthorized(pullErr) ||
 					strings.Contains(pullErr.Error(), "no basic auth credentials")
-				lgr.Debug("pull failure was lack of authorization: ", errdefs.IsUnauthorized(pullErr))
-				if !isUnauthorized && authFunc != nil {
-					lgr.Debug("failed to pull image: ", image)
-					return pullErr
-				}
-
-				lgr.Debug("attempting to pull image with PrivilegeFunc")
-				token, err := authFunc(lgr)()
-				if err != nil {
-					lgr.Debug("failed to pull image: ", image)
-					return pullErr
-				}
-				d, pullErr = cli.ImagePull(
-					context.Background(),
-					image,
-					types.ImagePullOptions{
-						RegistryAuth:  token,
-						PrivilegeFunc: authFunc(lgr),
-					},
-				)
-				if pullErr != nil {
-					lgr.Debug("failed to pull image: ", image)
-					return pullErr
-				}
+				lgr.Debug("pull failure was due to lack of authorization: ", isUnauthorized)
+				lgr.Debug("failed to pull image: ", image)
+				return pullErr
 			}
 
 			if resp, err := cli.ImageLoad(
@@ -267,7 +236,132 @@ func (s *Slot) startDockerInternal(u UnitInterface, remote bool) error {
 	return nil
 }
 
-func awsAuthFunc(lgr gcontext.Logger) types.RequestPrivilegeFunc {
+var (
+	ecrImageRegex = regexp.MustCompile("^([a-zA-Z0-9][a-zA-Z0-9-_]*).dkr.ecr.([a-zA-Z0-9][a-zA-Z0-9-_]*).amazonaws.com(.cn)?\\/.*")
+)
+
+func (s *Slot) getImageString(u UnitInterface, image string) string {
+	lgr := u.GetContext().Logger()
+
+	lgr.Debug("identifying image string")
+	if strings.Index(image, ":") > 0 {
+		lgr.Debug("image string contains tag, no more work to do")
+		return image
+	}
+
+	pieces := strings.SplitN(image, "/", 2)
+	if len(pieces) != 2 {
+		lgr.Debug("image in unexpected format: ", image)
+		return image
+	}
+
+	registry := pieces[0]
+	registryID := strings.SplitN(registry, ".", 2)[0]
+	repository := pieces[1]
+
+	// We only support tag identification functionality for AWS ECR,
+	// currently.
+	if !ecrImageRegex.MatchString(image) {
+		lgr.Debug("image is not in an AWS ECR registry, no more work to do")
+		return image
+	}
+
+	lgr.Debug("generating AWS ECR session")
+	sesh, err := session.NewSessionWithOptions(session.Options{
+		SharedConfigState: session.SharedConfigEnable,
+	})
+	if err != nil {
+		lgr.Debug("failed to generate AWS session: ", err)
+		return image
+	}
+	svc := ecr.New(sesh)
+
+	// Use DescribeImages
+	//
+	// https://docs.aws.amazon.com/sdk-for-go/api/service/ecr/#DescribeImagesInput
+	//
+	// need the repository name and (optional, registry ID (i.e. AWS account ID))
+	var mostRecentTag string
+	if err := svc.DescribeImagesPages(&ecr.DescribeImagesInput{
+		RegistryId:     aws.String(registryID),
+		RepositoryName: aws.String(repository),
+	}, func(page *ecr.DescribeImagesOutput, lastPage bool) bool {
+		images := page.ImageDetails
+
+		// TODO(ttacon): identify a better way to pull tags here
+		//
+		// One concern is if this is a named tag, we should look for an
+		// image's unique (hash) tag.
+		mostRecentTag = *(images[len(images)-1].ImageTags[0])
+		return !lastPage
+	}); err != nil {
+		lgr.Debug("failed to search all image tags, err: ", err)
+		return image
+	}
+
+	if len(mostRecentTag) == 0 {
+		lgr.Debug("failed to identify tag, exiting")
+		return image
+	}
+
+	lgr.Debug("identified tag as most recent: ", mostRecentTag)
+
+	// these our returned in order from oldest to newest, so we'll have to page through
+	// all of them...
+	//
+	// if the library supported better querying, we could do:
+	// https://stackoverflow.com/a/49413539/11254876
+
+	return image + ":" + mostRecentTag
+}
+
+func (s *Slot) dockerImagePullOptions(u UnitInterface) types.ImagePullOptions {
+	var (
+		authFunc func(gcontext.Logger, string) types.RequestPrivilegeFunc
+		opts     types.ImagePullOptions
+
+		lgr = u.GetContext().Logger()
+	)
+	lgr.Debug("generating docker ImagePullOptions")
+
+	if s.Provider.Extra == nil {
+		lgr.Debug("no extra config info found")
+		return opts
+	} else if funcType, ok := s.Provider.Extra["authProvider"]; !ok {
+		lgr.Debug("no authProvider identifier")
+		return opts
+	} else if funcType == "aws/ecr" {
+		lgr.Debug("identified authProvider of aws/ecr")
+		authFunc = awsAuthFunc
+	} else {
+		lgr.Debugf("unknown auth function %q, exiting\n", funcType)
+		return opts
+	}
+
+	image := s.Provider.Image
+	lgr.Debugf("attempting to pull image %q with PrivilegeFunc\n", image)
+	token, err := authFunc(lgr, image)()
+	if err != nil {
+		lgr.Debug("failed to generate auth information, err: ", err)
+		return opts
+	}
+
+	return types.ImagePullOptions{
+		RegistryAuth:  token,
+		PrivilegeFunc: authFunc(lgr, image),
+	}
+}
+
+func awsAuthFunc(lgr gcontext.Logger, image string) types.RequestPrivilegeFunc {
+	// Separate out register, repository and tag info
+	//
+	// 351073081746.dkr.ecr.us-east-1.amazonaws.com/mixmax-apps/files:53226da5
+
+	var registry string
+	if pieces := strings.SplitN(image, "/", 2); len(pieces) == 2 {
+		registry = pieces[0]
+	}
+
 	return func() (string, error) {
 		lgr.Debug("generating AWS SDK client")
 		sesh, err := session.NewSessionWithOptions(session.Options{
@@ -283,7 +377,13 @@ func awsAuthFunc(lgr gcontext.Logger) types.RequestPrivilegeFunc {
 		// https://docs.aws.amazon.com/sdk-for-go/api/service/ecr/#GetAuthorizationTokenInput
 		// https://docs.aws.amazon.com/sdk-for-go/api/service/ecr/#ECR.GetAuthorizationToken
 		lgr.Debug("requesting ECR authentication token")
-		result, err := svc.GetAuthorizationToken(&ecr.GetAuthorizationTokenInput{})
+		authTokenInput := ecr.GetAuthorizationTokenInput{}
+		if len(registry) > 0 {
+			authTokenInput.RegistryIds = []*string{
+				aws.String(strings.Split(registry, ".")[0]),
+			}
+		}
+		result, err := svc.GetAuthorizationToken(&authTokenInput)
 		if err != nil {
 			lgr.Debug("failed to retrieve authorization token: ", err)
 			return "", err
@@ -292,7 +392,7 @@ func awsAuthFunc(lgr gcontext.Logger) types.RequestPrivilegeFunc {
 			return "", errors.New("no valid authorization returned")
 		}
 
-		lgr.Debug("ECR returned authorization data", len(result.AuthorizationData))
+		lgr.Debug("ECR returned authorization data (num): ", len(result.AuthorizationData))
 		token := *result.AuthorizationData[0].AuthorizationToken
 		decodedToken, err := base64.StdEncoding.DecodeString(token)
 		if err != nil {
