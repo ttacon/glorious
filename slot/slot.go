@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -554,7 +555,35 @@ func (s *Slot) BashCmd(cmd string, remote bool) (exec.Cmd, error) {
 
 	if remote == false {
 		c := exec.Cmd{}
-		c.Dir = s.Provider.WorkingDir
+		// We want to do a bit of magic on the path here, even if
+		// it may not be entirely adviseable. It is, after all, only
+		// bash that supports this.
+		workingDir := s.Provider.WorkingDir
+		if strings.HasPrefix(workingDir, "~/") {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return c, err
+			}
+			workingDir = filepath.Join(
+				homeDir,
+				strings.TrimPrefix(
+					workingDir,
+					"~/",
+				),
+			)
+		} else {
+			// BUG(ttacon):
+			//
+			// This is wrong - we need to pull thhe path of the
+			// config file, not ourself - otherwise we're basing
+			// the relative path off of the wrong root.
+			cleaned, err := filepath.Abs(workingDir)
+			if err != nil {
+				return c, err
+			}
+			workingDir = cleaned
+		}
+		c.Dir = workingDir
 		c.Path = pieces[0]
 		if len(pieces) > 1 {
 			c.Args = pieces[1:]
