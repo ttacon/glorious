@@ -572,6 +572,11 @@ func (s *Slot) BashCmd(cmd string, remote bool) (exec.Cmd, error) {
 				),
 			)
 		} else {
+			// BUG(ttacon):
+			//
+			// This is wrong - we need to pull thhe path of the
+			// config file, not ourself - otherwise we're basing
+			// the relative path off of the wrong root.
 			cleaned, err := filepath.Abs(workingDir)
 			if err != nil {
 				return c, err
