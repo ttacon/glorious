@@ -156,8 +156,15 @@ func (u *Unit) SavePIDFile(c *exec.Cmd) error {
 }
 
 func (u *Unit) ProcessStatus() string {
-	slot, _ := u.IdentifySlot()
-	u.populateDockerStatus(slot)
+	slot, err := u.IdentifySlot()
+	if err != nil {
+		u.Context.Logger().Debug("failed to identify slot: ", err)
+		return NOT_STARTED
+	}
+
+	if strings.HasPrefix(slot.Provider.Type, "docker") {
+		u.populateDockerStatus(slot)
+	}
 
 	if u.Status == nil {
 		return NOT_STARTED
