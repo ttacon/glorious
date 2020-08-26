@@ -163,17 +163,17 @@ For more details, see Docker's notes here: https://success.docker.com/article/ho
 ### Running list of todos
 
  - [x] documentation on configuring `dockerd` for remote API access
- - [ ] `.glorious` file verification checks at boot up
+ - [x] `.glorious` file verification checks at boot up
  - [x] ~daemon for process status monitoring (?)~
    - instead, each provider should be responsible for its own state tracking.
  - [x] ability to identify if remote processes and docker containers are
        still running
- - [ ] support PID file based (bash) process state identification
+ - [x] support PID file based (bash) process state identification
  - [x] remote command execution (for "bash/remote" mode)
  - [x] file watching and remote synchronization
  - [x] remote dev mode constraints (initial setup, command hooks - i.e. npm
        install after `package[-lock].json` changes)
- - [ ] debug log mode
+ - [x] debug log mode
  - [x] support volume mounting and envvar files for "docker/*" modes
 
 
